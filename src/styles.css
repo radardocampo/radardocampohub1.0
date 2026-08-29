@@ -1,0 +1,192 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Radar do Campo Hub — design system
+ * Dark-first, superfícies em grafite azulado, acento verde-limão (campo).
+ * Cores por plataforma expostas como tokens --platform-*.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-youtube: var(--platform-youtube);
+  --color-tiktok: var(--platform-tiktok);
+  --color-instagram: var(--platform-instagram);
+  --color-pinterest: var(--platform-pinterest);
+  --color-threads: var(--platform-threads);
+  --color-facebook: var(--platform-facebook);
+  --color-kwai: var(--platform-kwai);
+  --color-shopee: var(--platform-shopee);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.875rem;
+  --sidebar-width: 16rem;
+
+  --background: oklch(0.28 0.018 250);
+  --foreground: oklch(0.98 0.005 250);
+  --surface: oklch(0.32 0.02 252);
+  --surface-2: oklch(0.36 0.022 252);
+  --card: oklch(0.32 0.02 252);
+  --card-foreground: oklch(0.98 0.005 250);
+  --popover: oklch(0.34 0.02 252);
+  --popover-foreground: oklch(0.98 0.005 250);
+  --primary: oklch(0.55 0.16 145);
+  --primary-foreground: oklch(0.98 0.01 145);
+  --secondary: oklch(0.39 0.022 252);
+  --secondary-foreground: oklch(0.98 0.005 250);
+  --muted: oklch(0.38 0.02 252);
+  --muted-foreground: oklch(0.85 0.02 252);
+  --accent: oklch(0.42 0.03 252);
+  --accent-foreground: oklch(0.98 0.005 250);
+  --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.98 0.005 250);
+  --success: oklch(0.75 0.16 155);
+  --success-foreground: oklch(0.2 0.05 155);
+  --warning: oklch(0.82 0.15 80);
+  --warning-foreground: oklch(0.24 0.05 80);
+  --border: oklch(0.42 0.02 252);
+  --input: oklch(0.42 0.02 252);
+  --ring: oklch(0.55 0.16 145);
+
+  --chart-1: oklch(0.55 0.16 145);
+  --chart-2: oklch(0.72 0.15 220);
+  --chart-3: oklch(0.75 0.18 20);
+  --chart-4: oklch(0.72 0.17 320);
+  --chart-5: oklch(0.83 0.15 80);
+
+  --platform-youtube: oklch(0.62 0.24 25);
+  --platform-tiktok: oklch(0.85 0.14 195);
+  --platform-instagram: oklch(0.68 0.22 350);
+  --platform-pinterest: oklch(0.58 0.21 20);
+  --platform-threads: oklch(0.9 0.005 250);
+  --platform-facebook: oklch(0.62 0.19 255);
+  --platform-kwai: oklch(0.76 0.19 45);
+  --platform-shopee: oklch(0.7 0.2 45);
+
+  --gradient-instagram: linear-gradient(
+    135deg,
+    oklch(0.75 0.17 60),
+    oklch(0.65 0.24 350) 55%,
+    oklch(0.55 0.22 295)
+  );
+  --gradient-primary: linear-gradient(135deg, var(--primary), oklch(0.45 0.14 145));
+  --gradient-surface: linear-gradient(160deg, oklch(0.35 0.025 252), oklch(0.3 0.018 250));
+  --gradient-field:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 20px,
+      oklch(1 1 1 / 3%) 20px,
+      oklch(1 1 1 / 3%) 40px
+    ),
+    linear-gradient(160deg, oklch(0.35 0.025 252), oklch(0.3 0.018 250));
+  --shadow-card: 0 1px 0 0 oklch(1 1 1 / 10%) inset, 0 12px 24px -12px oklch(0 0 0 / 40%);
+  --shadow-glow: 0 0 0 1px oklch(0.55 0.16 145 / 25%), 0 20px 50px -20px oklch(0.55 0.16 145 / 25%);
+
+  --sidebar: oklch(0.3 0.02 252);
+  --sidebar-foreground: oklch(0.96 0.005 250);
+  --sidebar-primary: oklch(0.55 0.16 145);
+  --sidebar-primary-foreground: oklch(0.98 0.01 145);
+  --sidebar-accent: oklch(0.38 0.022 252);
+  --sidebar-accent-foreground: oklch(0.98 0.005 250);
+  --sidebar-border: oklch(0.4 0.02 252);
+  --sidebar-ring: oklch(0.55 0.16 145);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+@utility panel {
+  background-image: var(--gradient-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+@utility text-gradient-instagram {
+  background-image: var(--gradient-instagram);
+  background-clip: text;
+  color: transparent;
+}
+
+@utility bg-gradient-instagram {
+  background-image: var(--gradient-instagram);
+}
+
+@utility bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+
+@utility panel-field {
+  background-image: var(--gradient-field);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
