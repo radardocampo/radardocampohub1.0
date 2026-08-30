@@ -46,13 +46,25 @@ serve(async (req) => {
       )
       .join("\n");
 
+    const { data: promptSetting, error: promptError } = await supabase
+      .from("ai_prompt_settings")
+      .select("instruction")
+      .eq("mode", "titulos")
+      .single();
+
+    let systemPrompt =
+      "Você é um especialista em marketing de conteúdo e SEO. Eu preciso de ideias de títulos e tags para um novo conteúdo.";
+    if (!promptError && promptSetting) {
+      systemPrompt = promptSetting.instruction;
+    }
+
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiApiKey) {
       throw new Error("Chave da API do Gemini não configurada.");
     }
 
     const promptText = `
-Você é um especialista em marketing de conteúdo e SEO. Eu preciso de ideias de títulos e tags para um novo conteúdo.
+${systemPrompt}
 Plataforma alvo: ${platform}
 Descrição do conteúdo: ${description}
 
@@ -67,7 +79,7 @@ Responda em português. Formate a resposta de maneira limpa, separando os títul
 `;
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: {
