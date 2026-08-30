@@ -70,13 +70,25 @@ Dados dos últimos 30 dias:
 - Receita Total: R$ ${totalRevenue.toFixed(2)}
     `;
 
+    const { data: promptSetting, error: promptError } = await supabase
+      .from("ai_prompt_settings")
+      .select("instruction")
+      .eq("mode", "analise")
+      .single();
+
+    let systemPrompt =
+      "Você é um assistente IA focado em análise de dados para um criador de conteúdo. Baseado apenas no seguinte contexto de dados de engajamento e financeiro dos últimos 30 dias, responda de forma objetiva, em português, à pergunta do usuário.";
+    if (!promptError && promptSetting) {
+      systemPrompt = promptSetting.instruction;
+    }
+
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiApiKey) {
       throw new Error("Chave da API do Gemini não configurada.");
     }
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: {
@@ -87,7 +99,7 @@ Dados dos últimos 30 dias:
             {
               parts: [
                 {
-                  text: `Você é um assistente IA focado em análise de dados para um criador de conteúdo. Baseado apenas no seguinte contexto de dados de engajamento e financeiro dos últimos 30 dias, responda de forma objetiva, em português, à pergunta do usuário.\n\nContexto dos dados:\n${contextText}\n\nPergunta do usuário: ${prompt}`,
+                  text: `${systemPrompt}\n\nContexto dos dados:\n${contextText}\n\nPergunta do usuário: ${prompt}`,
                 },
               ],
             },
