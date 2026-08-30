@@ -389,7 +389,7 @@ function ImagemTab() {
 
       const { data, error } = await supabase.functions.invoke("ai-enhance-image", {
         body: {
-          imageBase64: base64Image,
+          imageBase64: base64Image.split(",")[1],
           instruction: extraInstruction,
         },
       });
