@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
+import { VoiceNarrationTab } from "@/components/assistente/VoiceNarrationTab";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,7 @@ function AssistentePage() {
           <TabsTrigger value="analise">Análise</TabsTrigger>
           <TabsTrigger value="titulos">Títulos e Tags</TabsTrigger>
           <TabsTrigger value="imagem">Melhorar Imagem</TabsTrigger>
+          <TabsTrigger value="narracao">Narração</TabsTrigger>
         </TabsList>
         <TabsContent value="analise">
           <AnaliseTab />
@@ -49,8 +52,8 @@ function AssistentePage() {
         <TabsContent value="imagem">
           <ImagemTab />
         </TabsContent>
-        <TabsContent value="titulos">
-          <TitulosTab />
+        <TabsContent value="narracao">
+          <VoiceNarrationTab />
         </TabsContent>
       </Tabs>
     </AppShell>

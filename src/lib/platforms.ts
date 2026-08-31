@@ -11,14 +11,7 @@ import {
 } from "lucide-react";
 
 export type PlatformId =
-  | "youtube"
-  | "tiktok"
-  | "instagram"
-  | "pinterest"
-  | "threads"
-  | "facebook"
-  | "kwai"
-  | "shopee";
+  "youtube" | "tiktok" | "instagram" | "pinterest" | "threads" | "facebook" | "kwai" | "shopee";
 
 export type PlatformMeta = {
   id: PlatformId;
