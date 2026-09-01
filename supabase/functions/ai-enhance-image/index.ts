@@ -56,7 +56,7 @@ serve(async (req) => {
     }
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: {
@@ -78,6 +78,9 @@ serve(async (req) => {
               ],
             },
           ],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+          },
         }),
       },
     );
@@ -89,13 +92,21 @@ serve(async (req) => {
       throw new Error("Erro na API do Gemini");
     }
 
-    const aiResponseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    const parts = geminiData.candidates?.[0]?.content?.parts || [];
+    let aiResponseImage = null;
 
-    if (!aiResponseText) {
+    for (const part of parts) {
+      if (part.inlineData && part.inlineData.data) {
+        aiResponseImage = part.inlineData.data;
+        break;
+      }
+    }
+
+    if (!aiResponseImage) {
       throw new Error("Não foi possível gerar a imagem aprimorada.");
     }
 
-    return new Response(JSON.stringify({ response: aiResponseText }), {
+    return new Response(JSON.stringify({ response: aiResponseImage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
