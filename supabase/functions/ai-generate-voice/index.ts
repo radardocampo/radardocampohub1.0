@@ -82,8 +82,9 @@ serve(async (req) => {
     }
 
     const audioBase64 = audioPart.inlineData.data;
+    const mimeType = audioPart.inlineData.mimeType || "audio/wav";
 
-    return new Response(JSON.stringify({ audioBase64 }), {
+    return new Response(JSON.stringify({ audioBase64, mimeType }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {

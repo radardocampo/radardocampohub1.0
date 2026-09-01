@@ -1,3 +1,9 @@
+declare global {
+  interface Window {
+    __lastAudioBase64?: string;
+    __lastAudioMimeType?: string;
+  }
+}
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,8 +65,12 @@ export function VoiceNarrationTab() {
         // We will default to a data URI for wav or mp3 based on generic support.
         // Gemini generally returns `audio/mp3` or `audio/wav`. We can just use `data:audio/wav;base64,`
         // if we assume it's PCM or similar. Actually, let's just make it a raw data URL with generic audio/mp3.
-        const url = `data:audio/mp3;base64,${data.audioBase64}`;
+        const mimeType = data.mimeType || "audio/wav";
+        const url = `data:${mimeType};base64,${data.audioBase64}`;
         setAudioUrl(url);
+        // Store base64 for proper download later
+        window.__lastAudioBase64 = data.audioBase64;
+        window.__lastAudioMimeType = mimeType;
         toast.success("Narração gerada com sucesso!");
       } else {
         throw new Error("Resposta inesperada do servidor (sem áudio).");
@@ -75,12 +85,53 @@ export function VoiceNarrationTab() {
 
   const handleDownload = () => {
     if (!audioUrl) return;
-    const a = document.createElement("a");
-    a.href = audioUrl;
-    a.download = `narracao-${voiceName}-${Date.now()}.mp3`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const base64Data = window.__lastAudioBase64;
+      const mimeType = window.__lastAudioMimeType || "audio/wav";
+
+      if (!base64Data) {
+        // Fallback if data URI is all we have
+        const a = document.createElement("a");
+        a.href = audioUrl;
+        a.download = `narracao-${voiceName}-${Date.now()}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      // Convert base64 to binary
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+
+      // Create blob
+      const blob = new Blob([byteArray], { type: mimeType });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      const extension = mimeType.includes("mp3") ? "mp3" : "wav";
+      a.download = `narracao-${voiceName}-${Date.now()}.${extension}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Cleanup
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+    } catch (err) {
+      console.error("Error creating download blob:", err);
+      // Fallback
+      const a = document.createElement("a");
+      a.href = audioUrl;
+      a.download = `narracao-${voiceName}-${Date.now()}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
   return (
@@ -185,7 +236,7 @@ export function VoiceNarrationTab() {
         {audioUrl && (
           <Button variant="outline" className="w-full mt-4" onClick={handleDownload}>
             <Download className="mr-2 h-4 w-4" />
-            Baixar Áudio (.mp3)
+            Baixar Áudio
           </Button>
         )}
       </div>
