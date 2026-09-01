@@ -1,4 +1,32 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { decode, encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+
+function createWavHeader(dataLength: number, sampleRate: number, numChannels = 1, bitsPerSample = 16): Uint8Array {
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const buffer = new ArrayBuffer(44);
+  const view = new DataView(buffer);
+
+  function writeString(offset: number, str: string) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, "data");
+  view.setUint32(40, dataLength, true);
+
+  return new Uint8Array(buffer);
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -81,8 +109,30 @@ serve(async (req) => {
       throw new Error("A API não retornou áudio.");
     }
 
-    const audioBase64 = audioPart.inlineData.data;
-    const mimeType = audioPart.inlineData.mimeType || "audio/wav";
+    const rawBase64 = audioPart.inlineData.data;
+    const rawMimeType = audioPart.inlineData.mimeType || "";
+
+    // Extract sample rate from mime type, eg: audio/L16;codec=pcm;rate=24000
+    let sampleRate = 24000;
+    const rateMatch = rawMimeType.match(/rate=(\d+)/);
+    if (rateMatch && rateMatch[1]) {
+      sampleRate = parseInt(rateMatch[1], 10);
+    }
+
+    // Decode base64 PCM data to Uint8Array
+    const pcmData = decode(rawBase64);
+
+    // Generate WAV header
+    const wavHeader = createWavHeader(pcmData.length, sampleRate);
+
+    // Combine header and PCM data
+    const wavBuffer = new Uint8Array(wavHeader.length + pcmData.length);
+    wavBuffer.set(wavHeader, 0);
+    wavBuffer.set(pcmData, wavHeader.length);
+
+    // Encode back to base64
+    const audioBase64 = encode(wavBuffer);
+    const mimeType = "audio/wav";
 
     return new Response(JSON.stringify({ audioBase64, mimeType }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
