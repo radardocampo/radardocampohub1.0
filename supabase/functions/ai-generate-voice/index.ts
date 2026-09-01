@@ -36,7 +36,7 @@ serve(async (req) => {
     parts.push({ text: `Text to read:\n${text}` });
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: {
@@ -82,8 +82,9 @@ serve(async (req) => {
     }
 
     const audioBase64 = audioPart.inlineData.data;
+    const mimeType = audioPart.inlineData.mimeType || "audio/wav";
 
-    return new Response(JSON.stringify({ audioBase64 }), {
+    return new Response(JSON.stringify({ audioBase64, mimeType }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
