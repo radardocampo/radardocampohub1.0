@@ -36,7 +36,7 @@ serve(async (req) => {
     parts.push({ text: `Text to read:\n${text}` });
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: {
