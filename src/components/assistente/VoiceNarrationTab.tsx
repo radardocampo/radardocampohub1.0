@@ -1,9 +1,3 @@
-declare global {
-  interface Window {
-    __lastAudioBase64?: string;
-    __lastAudioMimeType?: string;
-  }
-}
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +13,17 @@ import { Loader2, Download, Play, Pause } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+const base64ToBlob = (base64: string, mimeType: string): Blob => {
+  const cleanBase64 = base64.replace(/^data:audio\/\w+;base64,/, "");
+  const byteCharacters = atob(cleanBase64);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: mimeType });
+};
+
 export function VoiceNarrationTab() {
   const [scene, setScene] = useState("");
   const [sampleContext, setSampleContext] = useState(
@@ -29,6 +34,7 @@ export function VoiceNarrationTab() {
 
   const [loading, setLoading] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioExtension, setAudioExtension] = useState<string>("wav");
 
   const handleGenerate = async () => {
     if (!text.trim()) {
@@ -58,19 +64,14 @@ export function VoiceNarrationTab() {
       }
 
       if (data?.audioBase64) {
-        // Assume default base64 audio format from Gemini is usually linear16 or MP3/WAV.
-        // Usually, when responseModalities=["AUDIO"], Gemini returns audio/pcm or similar,
-        // we'll create a blob and object URL. We prefix it with proper MIME for a generic audio fallback.
-        // Actually it doesn't specify MIME cleanly in data unless we parsed it.
-        // We will default to a data URI for wav or mp3 based on generic support.
-        // Gemini generally returns `audio/mp3` or `audio/wav`. We can just use `data:audio/wav;base64,`
-        // if we assume it's PCM or similar. Actually, let's just make it a raw data URL with generic audio/mp3.
         const mimeType = data.mimeType || "audio/wav";
-        const url = `data:${mimeType};base64,${data.audioBase64}`;
-        setAudioUrl(url);
-        // Store base64 for proper download later
-        window.__lastAudioBase64 = data.audioBase64;
-        window.__lastAudioMimeType = mimeType;
+        const extension = mimeType.includes("mp3") ? "mp3" : "wav";
+        setAudioExtension(extension);
+
+        const blob = base64ToBlob(data.audioBase64, mimeType);
+        const blobUrl = URL.createObjectURL(blob);
+
+        setAudioUrl(blobUrl);
         toast.success("Narração gerada com sucesso!");
       } else {
         throw new Error("Resposta inesperada do servidor (sem áudio).");
@@ -86,51 +87,15 @@ export function VoiceNarrationTab() {
   const handleDownload = () => {
     if (!audioUrl) return;
     try {
-      const base64Data = window.__lastAudioBase64;
-      const mimeType = window.__lastAudioMimeType || "audio/wav";
-
-      if (!base64Data) {
-        // Fallback if data URI is all we have
-        const a = document.createElement("a");
-        a.href = audioUrl;
-        a.download = `narracao-${voiceName}-${Date.now()}.wav`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        return;
-      }
-
-      // Convert base64 to binary
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-
-      // Create blob
-      const blob = new Blob([byteArray], { type: mimeType });
-      const blobUrl = URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      const extension = mimeType.includes("mp3") ? "mp3" : "wav";
-      a.download = `narracao-${voiceName}-${Date.now()}.${extension}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      // Cleanup
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-    } catch (err) {
-      console.error("Error creating download blob:", err);
-      // Fallback
       const a = document.createElement("a");
       a.href = audioUrl;
-      a.download = `narracao-${voiceName}-${Date.now()}.wav`;
+      a.download = `narracao-${voiceName}-${Date.now()}.${audioExtension}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    } catch (err) {
+      console.error("Error creating download:", err);
+      toast.error("Erro ao baixar o áudio.");
     }
   };
 
