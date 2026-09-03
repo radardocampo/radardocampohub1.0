@@ -179,7 +179,10 @@ function MetricsPage() {
           return (
             <button
               key={platform.id}
+              type="button"
               onClick={() => setSelected(platform.id)}
+              aria-pressed={active}
+              aria-label={`Visualizar métricas do ${platform.name}`}
               className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-base font-medium transition-colors ${
                 active
                   ? `border-transparent shadow-sm ${platform.bgClass} ${platform.textClass}`
