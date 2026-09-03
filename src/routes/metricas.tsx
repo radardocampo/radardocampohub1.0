@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import {
   Area,
   AreaChart,
@@ -9,10 +11,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
-import { buildSnapshots, type PlatformSnapshot } from "@/lib/mock-data";
+import { buildSnapshots, type MetricPoint, type PlatformSnapshot } from "@/lib/mock-data";
 import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform } from "@/lib/platforms";
+import { getYoutubeMetrics, syncYoutubeMetrics } from "@/lib/youtube.functions";
 
 const RANGES = [
   { days: 7, label: "7 dias" },
@@ -41,6 +46,8 @@ export const Route = createFileRoute("/metricas")({
         property: "og:description",
         content: "Evolução detalhada de audiência e engajamento por plataforma e período.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: MetricsPage,
@@ -49,27 +56,119 @@ export const Route = createFileRoute("/metricas")({
 function MetricsPage() {
   const [days, setDays] = useState<number>(30);
   const [selected, setSelected] = useState<string>("youtube");
-  const snapshots = useMemo(() => buildSnapshots(days), [days]);
+  const queryClient = useQueryClient();
+
+  const fetchYoutube = useServerFn(getYoutubeMetrics);
+  const runSync = useServerFn(syncYoutubeMetrics);
+
+  const youtubeQuery = useQuery({
+    queryKey: ["youtube-metrics", days],
+    queryFn: () => fetchYoutube({ data: { days } }),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => runSync({ data: undefined }),
+    onMutate: () => {
+      toast.info("Iniciando sincronização com o YouTube...", { id: "sync-youtube" });
+    },
+    onSuccess: async () => {
+      toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao sincronizar: ${message}`, { id: "sync-youtube" });
+    },
+  });
+
+  const youtubeSnapshot = useMemo<PlatformSnapshot | null>(() => {
+    const rows = youtubeQuery.data ?? [];
+    if (rows.length === 0) return null;
+
+    const series: MetricPoint[] = rows.map((row) => {
+      const parsed = new Date(`${row.date}T00:00:00`);
+      return {
+        date: row.date,
+        label: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+        followers: row.followers,
+        views: row.views,
+        likes: row.likes,
+        engagement_rate: row.engagement_rate,
+      };
+    });
+
+    const first = series[0]!;
+    const last = series[series.length - 1]!;
+    const followersDelta =
+      first.followers > 0
+        ? Number((((last.followers - first.followers) / first.followers) * 100).toFixed(1))
+        : 0;
+
+    return {
+      id: "youtube",
+      followers: last.followers,
+      followersDelta,
+      views: series.reduce((sum, point) => sum + point.views, 0),
+      likes: series.reduce((sum, point) => sum + point.likes, 0),
+      engagement_rate: Number(
+        (series.reduce((sum, point) => sum + point.engagement_rate, 0) / series.length).toFixed(2),
+      ),
+      series,
+    } as PlatformSnapshot;
+  }, [youtubeQuery.data]);
+
+  const snapshots = useMemo(() => {
+    const mocks = buildSnapshots(days);
+    return mocks.map((snap) =>
+      snap.id === "youtube"
+        ? (youtubeSnapshot ?? {
+            ...snap,
+            followers: 0,
+            followersDelta: 0,
+            views: 0,
+            likes: 0,
+            engagement_rate: 0,
+            series: [],
+          })
+        : snap,
+    );
+  }, [days, youtubeSnapshot]);
+
   const current = snapshots.find((s) => s.id === selected) ?? snapshots[0]!;
   const meta = getPlatform(current.id);
+  const isYoutube = selected === "youtube";
 
   return (
     <AppShell
       title="Métricas"
       subtitle="Audiência e engajamento por plataforma."
       actions={
-        <div className="flex gap-1 rounded-lg bg-secondary p-1">
-          {RANGES.map((range) => (
+        <div className="flex flex-wrap items-center gap-3">
+          {isYoutube && (
             <Button
-              key={range.days}
               size="sm"
-              variant={days === range.days ? "default" : "ghost"}
-              onClick={() => setDays(range.days)}
-              className="px-4 text-sm font-medium"
+              variant="outline"
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="gap-2"
             >
-              {range.label}
+              <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+              Sincronizar agora
             </Button>
-          ))}
+          )}
+          <div className="flex gap-1 rounded-lg bg-secondary p-1">
+            {RANGES.map((range) => (
+              <Button
+                key={range.days}
+                size="sm"
+                variant={days === range.days ? "default" : "ghost"}
+                onClick={() => setDays(range.days)}
+                className="px-4 text-sm font-medium"
+              >
+                {range.label}
+              </Button>
+            ))}
+          </div>
         </div>
       }
     >
@@ -124,90 +223,99 @@ function MetricsPage() {
         <p className="text-base text-muted-foreground mt-1">
           Views por dia e crescimento de seguidores.
         </p>
-        <div className="mt-8 grid gap-8 lg:grid-cols-2">
-          <div className="h-[340px]">
-            <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Views por dia
-            </p>
-            <ResponsiveContainer width="100%" height="90%">
-              <AreaChart data={current.series}>
-                <defs>
-                  <linearGradient id="viewsFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={meta.color} stopOpacity={0.5} />
-                    <stop offset="100%" stopColor={meta.color} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
-                <XAxis
-                  dataKey="label"
-                  stroke="var(--muted-foreground)"
-                  fontSize={13}
-                  tickMargin={12}
-                  minTickGap={28}
-                />
-                <YAxis
-                  stroke="var(--muted-foreground)"
-                  fontSize={13}
-                  width={56}
-                  tickFormatter={(v: number) => formatNumber(v)}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(value: number) => [formatFull(value), "Views"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="views"
-                  stroke={meta.color}
-                  strokeWidth={3}
-                  fill="url(#viewsFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
 
-          <div className="h-[340px]">
-            <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Seguidores
-            </p>
-            <ResponsiveContainer width="100%" height="90%">
-              <AreaChart data={current.series}>
-                <defs>
-                  <linearGradient id="followersFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
-                <XAxis
-                  dataKey="label"
-                  stroke="var(--muted-foreground)"
-                  fontSize={13}
-                  tickMargin={12}
-                  minTickGap={28}
-                />
-                <YAxis
-                  stroke="var(--muted-foreground)"
-                  fontSize={13}
-                  width={56}
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(v: number) => formatNumber(v)}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(value: number) => [formatFull(value), "Seguidores"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="followers"
-                  stroke="var(--primary)"
-                  strokeWidth={3}
-                  fill="url(#followersFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+        {isYoutube && youtubeQuery.isLoading ? (
+          <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+        ) : current.series.length === 0 ? (
+          <p className="mt-8 text-base text-muted-foreground">
+            Sem dados no período selecionado. Clique em “Sincronizar agora” para baixar as métricas.
+          </p>
+        ) : (
+          <div className="mt-8 grid gap-8 lg:grid-cols-2">
+            <div className="h-[340px]">
+              <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Views por dia
+              </p>
+              <ResponsiveContainer width="100%" height="90%">
+                <AreaChart data={current.series}>
+                  <defs>
+                    <linearGradient id="viewsFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={meta.color} stopOpacity={0.5} />
+                      <stop offset="100%" stopColor={meta.color} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="label"
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    tickMargin={12}
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    width={56}
+                    tickFormatter={(v: number) => formatNumber(v)}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value: number) => [formatFull(value), "Views"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="views"
+                    stroke={meta.color}
+                    strokeWidth={3}
+                    fill="url(#viewsFill)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="h-[340px]">
+              <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Seguidores
+              </p>
+              <ResponsiveContainer width="100%" height="90%">
+                <AreaChart data={current.series}>
+                  <defs>
+                    <linearGradient id="followersFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="label"
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    tickMargin={12}
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    width={56}
+                    domain={["dataMin", "dataMax"]}
+                    tickFormatter={(v: number) => formatNumber(v)}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value: number) => [formatFull(value), "Seguidores"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="followers"
+                    stroke="var(--primary)"
+                    strokeWidth={3}
+                    fill="url(#followersFill)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
       <section className="panel mt-10 overflow-x-auto p-6">
