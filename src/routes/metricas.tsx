@@ -234,18 +234,23 @@ function MetricsPage() {
         <MetricTile
           label="Views"
           value={formatNumber(current.views)}
-          hint="no período selecionado"
+          hint={
+            isYoutube && (youtubeQuery.data?.length ?? 0) < 2
+              ? "acumulando dados desde hoje"
+              : "crescimento no período selecionado"
+          }
         />
         <MetricTile
           label="Curtidas"
           value={formatNumber(current.likes)}
-          hint="no período selecionado"
+          hint={isYoutube ? "últimos 10 vídeos publicados" : "no período selecionado"}
         />
         <MetricTile
           label="Engajamento"
           value={`${current.engagement_rate}%`}
-          hint="média do período"
+          hint={isYoutube ? "últimos 10 vídeos publicados" : "média do período"}
         />
+
       </div>
 
       <section className="panel mt-10 p-6">
