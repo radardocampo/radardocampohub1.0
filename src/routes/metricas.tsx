@@ -71,7 +71,23 @@ function MetricsPage() {
       const { data, error } = await supabase.functions.invoke("sync-youtube-metrics", {
         method: "POST",
       });
-      if (error) throw new Error(error.message);
+      if (error) {
+        // A mensagem padrão do supabase-js é genérica; o motivo real vem no corpo da resposta.
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {
+            /* corpo não é JSON: mantém a mensagem padrão */
+          }
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
       return data;
     },
     onMutate: () => {
@@ -83,9 +99,13 @@ function MetricsPage() {
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
-      toast.error(`Falha ao sincronizar: ${message}`, { id: "sync-youtube" });
+      const hint = message.toLowerCase().includes("canal não encontrado")
+        ? " Verifique o secret YOUTUBE_CHANNEL_ID no Supabase (deve ser o ID do canal, começando com UC...)."
+        : "";
+      toast.error(`Falha ao sincronizar: ${message}${hint}`, { id: "sync-youtube", duration: 8000 });
     },
   });
+
 
   const youtubeSnapshot = useMemo<PlatformSnapshot | null>(() => {
     const rows = youtubeQuery.data ?? [];
