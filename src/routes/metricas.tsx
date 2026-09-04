@@ -111,20 +111,24 @@ function MetricsPage() {
     const rows = youtubeQuery.data ?? [];
     if (rows.length === 0) return null;
 
-    const series: MetricPoint[] = rows.map((row) => {
+    // metrics_daily guarda o total acumulado de views do canal.
+    // Para exibir "views no período" usamos a diferença entre dias.
+    const series: MetricPoint[] = rows.map((row, index) => {
       const parsed = new Date(`${row.date}T00:00:00`);
+      const previous = index > 0 ? rows[index - 1]! : null;
+      const dailyViews = previous ? Math.max(0, row.views - previous.views) : 0;
       return {
         date: row.date,
         label: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
         followers: row.followers,
-        views: row.views,
+        views: dailyViews,
         likes: row.likes,
         engagement_rate: row.engagement_rate,
       };
     });
 
-    const first = series[0]!;
-    const last = series[series.length - 1]!;
+    const first = rows[0]!;
+    const last = rows[rows.length - 1]!;
     const followersDelta =
       first.followers > 0
         ? Number((((last.followers - first.followers) / first.followers) * 100).toFixed(1))
@@ -134,14 +138,13 @@ function MetricsPage() {
       id: "youtube",
       followers: last.followers,
       followersDelta,
-      views: series.reduce((sum, point) => sum + point.views, 0),
-      likes: series.reduce((sum, point) => sum + point.likes, 0),
-      engagement_rate: Number(
-        (series.reduce((sum, point) => sum + point.engagement_rate, 0) / series.length).toFixed(2),
-      ),
+      views: rows.length > 1 ? Math.max(0, last.views - first.views) : 0,
+      likes: last.likes,
+      engagement_rate: last.engagement_rate,
       series,
     } as PlatformSnapshot;
   }, [youtubeQuery.data]);
+
 
   const snapshots = useMemo(() => {
     const mocks = buildSnapshots(days);
