@@ -106,11 +106,7 @@ export const syncYoutubeMetrics = createServerFn({ method: "POST" }).handler(asy
   const today = new Date().toISOString().slice(0, 10);
 
   // Sem constraint única em (platform_id, date): substitui o registro do dia.
-  await supabaseAdmin
-    .from("metrics_daily")
-    .delete()
-    .eq("platform_id", "youtube")
-    .eq("date", today);
+  await supabaseAdmin.from("metrics_daily").delete().eq("platform_id", "youtube").eq("date", today);
 
   const { error: insertError } = await supabaseAdmin.from("metrics_daily").insert({
     platform_id: "youtube",

@@ -1,7 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { decode, encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
-function createWavHeader(dataLength: number, sampleRate: number, numChannels = 1, bitsPerSample = 16): Uint8Array {
+function createWavHeader(
+  dataLength: number,
+  sampleRate: number,
+  numChannels = 1,
+  bitsPerSample = 16,
+): Uint8Array {
   const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
   const blockAlign = numChannels * (bitsPerSample / 8);
   const buffer = new ArrayBuffer(44);
