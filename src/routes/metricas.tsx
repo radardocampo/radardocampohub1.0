@@ -17,7 +17,8 @@ import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { buildSnapshots, type MetricPoint, type PlatformSnapshot } from "@/lib/mock-data";
 import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform } from "@/lib/platforms";
-import { getYoutubeMetrics, syncYoutubeMetrics } from "@/lib/youtube.functions";
+import { supabase } from "@/integrations/supabase/client";
+import { getYoutubeMetrics } from "@/lib/youtube.functions";
 
 const RANGES = [
   { days: 7, label: "7 dias" },
@@ -59,7 +60,6 @@ function MetricsPage() {
   const queryClient = useQueryClient();
 
   const fetchYoutube = useServerFn(getYoutubeMetrics);
-  const runSync = useServerFn(syncYoutubeMetrics);
 
   const youtubeQuery = useQuery({
     queryKey: ["youtube-metrics", days],
@@ -67,7 +67,13 @@ function MetricsPage() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: () => runSync({ data: undefined }),
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("sync-youtube-metrics", {
+        method: "POST",
+      });
+      if (error) throw new Error(error.message);
+      return data;
+    },
     onMutate: () => {
       toast.info("Iniciando sincronização com o YouTube...", { id: "sync-youtube" });
     },
