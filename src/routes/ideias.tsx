@@ -50,6 +50,7 @@ function IdeasPage() {
           size="sm"
           variant={filter === "todos" ? "default" : "secondary"}
           onClick={() => setFilter("todos")}
+          aria-pressed={filter === "todos"}
         >
           Todos
         </Button>
@@ -59,6 +60,7 @@ function IdeasPage() {
             size="sm"
             variant={filter === status ? "default" : "secondary"}
             onClick={() => setFilter(status)}
+            aria-pressed={filter === status}
           >
             {STATUS_LABEL[status]} ({MOCK_IDEAS.filter((i) => i.status === status).length})
           </Button>
