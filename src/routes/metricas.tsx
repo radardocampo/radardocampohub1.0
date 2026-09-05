@@ -102,10 +102,12 @@ function MetricsPage() {
       const hint = message.toLowerCase().includes("canal não encontrado")
         ? " Verifique o secret YOUTUBE_CHANNEL_ID no Supabase (deve ser o ID do canal, começando com UC...)."
         : "";
-      toast.error(`Falha ao sincronizar: ${message}${hint}`, { id: "sync-youtube", duration: 8000 });
+      toast.error(`Falha ao sincronizar: ${message}${hint}`, {
+        id: "sync-youtube",
+        duration: 8000,
+      });
     },
   });
-
 
   const youtubeSnapshot = useMemo<PlatformSnapshot | null>(() => {
     const rows = youtubeQuery.data ?? [];
@@ -144,7 +146,6 @@ function MetricsPage() {
       series,
     } as PlatformSnapshot;
   }, [youtubeQuery.data]);
-
 
   const snapshots = useMemo(() => {
     const mocks = buildSnapshots(days);
@@ -250,7 +251,6 @@ function MetricsPage() {
           value={`${current.engagement_rate}%`}
           hint={isYoutube ? "últimos 10 vídeos publicados" : "média do período"}
         />
-
       </div>
 
       <section className="panel mt-10 p-6">
