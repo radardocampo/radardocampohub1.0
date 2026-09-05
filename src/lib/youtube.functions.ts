@@ -33,3 +33,21 @@ export const getYoutubeMetrics = createServerFn({ method: "GET" })
       engagement_rate: Number(r.engagement_rate),
     }));
   });
+
+export const checkYoutubeHistoryExists = createServerFn({ method: "GET" })
+  .handler(async (): Promise<boolean> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const { data: row, error } = await supabaseAdmin
+      .from("metrics_daily")
+      .select("id")
+      .eq("platform_id", "youtube")
+      .lt("date", sevenDaysAgo.toISOString().slice(0, 10))
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return !!row;
+  });
