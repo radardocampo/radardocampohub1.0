@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { buildSnapshots, type MetricPoint, type PlatformSnapshot } from "@/lib/mock-data";
 import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform } from "@/lib/platforms";
 import { supabase } from "@/integrations/supabase/client";
-import { getYoutubeMetrics } from "@/lib/youtube.functions";
+import { getYoutubeMetrics, checkYoutubeHistoryExists } from "@/lib/youtube.functions";
 
 const RANGES = [
   { days: 7, label: "7 dias" },
@@ -60,6 +60,12 @@ function MetricsPage() {
   const queryClient = useQueryClient();
 
   const fetchYoutube = useServerFn(getYoutubeMetrics);
+  const fetchHistoryExists = useServerFn(checkYoutubeHistoryExists);
+
+  const historyExistsQuery = useQuery({
+    queryKey: ["youtube-history-exists"],
+    queryFn: () => fetchHistoryExists(),
+  });
 
   const youtubeQuery = useQuery({
     queryKey: ["youtube-metrics", days],
@@ -108,6 +114,44 @@ function MetricsPage() {
       });
     },
   });
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
+        method: "POST",
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data;
+    },
+    onMutate: () => {
+      toast.info("Iniciando backfill histórico. Isso pode levar alguns segundos...", { id: "backfill-youtube" });
+    },
+    onSuccess: async () => {
+      toast.success("Histórico preenchido com sucesso!", { id: "backfill-youtube" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao preencher histórico: ${message}`, { id: "backfill-youtube", duration: 8000 });
+    },
+  });
+
 
   const youtubeSnapshot = useMemo<PlatformSnapshot | null>(() => {
     const rows = youtubeQuery.data ?? [];
@@ -175,16 +219,30 @@ function MetricsPage() {
       actions={
         <div className="flex flex-wrap items-center gap-3">
           {isYoutube && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="gap-2"
-            >
-              <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-              Sincronizar agora
-            </Button>
+            <>
+              {historyExistsQuery.data === false && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => backfillMutation.mutate()}
+                  disabled={backfillMutation.isPending}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`size-4 ${backfillMutation.isPending ? "animate-spin" : ""}`} />
+                  Preencher histórico
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                className="gap-2"
+              >
+                <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                Sincronizar agora
+              </Button>
+            </>
           )}
           <div className="flex gap-1 rounded-lg bg-secondary p-1">
             {RANGES.map((range) => (
