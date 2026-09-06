@@ -37,7 +37,6 @@ import {
   getYoutubeBestPostingTime,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
-import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const RANGES = [
