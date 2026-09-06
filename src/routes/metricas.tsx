@@ -102,6 +102,48 @@ function MetricsPage() {
     onSuccess: async () => {
       toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      const hint = message.toLowerCase().includes("canal não encontrado")
+        ? " Verifique o secret YOUTUBE_CHANNEL_ID no Supabase (deve ser o ID do canal, começando com UC...)."
+        : "";
+      toast.error(`Falha ao sincronizar: ${message}${hint}`, {
+        id: "sync-youtube",
+        duration: 8000,
+      });
+    },
+  });
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
+        method: "POST",
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data;
+    },
+    onMutate: () => {
+      toast.info("Iniciando backfill histórico. Isso pode levar alguns segundos...", { id: "backfill-youtube" });
+    },
+    onSuccess: async () => {
+      toast.success("Histórico preenchido com sucesso!", { id: "backfill-youtube" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
     },
     onError: (error: unknown) => {
@@ -162,7 +204,6 @@ function MetricsPage() {
       series,
     } as any;
   }, [youtubeQuery.data]);
-
 
   const snapshots = useMemo(() => {
     const mocks = buildSnapshots(days);
@@ -374,6 +415,88 @@ function MetricsPage() {
                 value={formatNumber(current.likes)}
                 hint="soma do período selecionado"
               />
+      <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricTile
+          label="Seguidores"
+          value={formatFull(current.followers)}
+          hint={`+${current.followersDelta}% no período`}
+        />
+        <MetricTile
+          label="Views"
+          value={formatNumber(current.views)}
+          hint={
+            isYoutube && (youtubeQuery.data?.length ?? 0) < 2
+              ? "acumulando dados desde hoje"
+              : "crescimento no período selecionado"
+          }
+        />
+        <MetricTile
+          label="Curtidas"
+          value={formatNumber(current.likes)}
+          hint={isYoutube ? "últimos 10 vídeos publicados" : "no período selecionado"}
+        />
+        <MetricTile
+          label="Engajamento"
+          value={`${current.engagement_rate}%`}
+          hint={isYoutube ? "últimos 10 vídeos publicados" : "média do período"}
+        />
+      </div>
+
+      <section className="panel mt-10 p-6">
+        <h2 className="text-2xl font-semibold">
+          Evolução — <span className={meta.textClass}>{meta.name}</span>
+        </h2>
+        <p className="text-base text-muted-foreground mt-1">
+          Views por dia e crescimento de seguidores.
+        </p>
+
+        {isYoutube && youtubeQuery.isLoading ? (
+          <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+        ) : current.series.length === 0 ? (
+          <p className="mt-8 text-base text-muted-foreground">
+            Sem dados no período selecionado. Clique em “Sincronizar agora” para baixar as métricas.
+          </p>
+        ) : (
+          <div className="mt-8 grid gap-8 lg:grid-cols-2">
+            <div className="h-[340px]">
+              <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Views por dia
+              </p>
+              <ResponsiveContainer width="100%" height="90%">
+                <AreaChart data={current.series}>
+                  <defs>
+                    <linearGradient id="viewsFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={meta.color} stopOpacity={0.5} />
+                      <stop offset="100%" stopColor={meta.color} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="label"
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    tickMargin={12}
+                    minTickGap={28}
+                  />
+                  <YAxis
+                    stroke="var(--muted-foreground)"
+                    fontSize={13}
+                    width={56}
+                    tickFormatter={(v: number) => formatNumber(v)}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value: number) => [formatFull(value), "Views"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="views"
+                    stroke={meta.color}
+                    strokeWidth={3}
+                    fill="url(#viewsFill)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">
