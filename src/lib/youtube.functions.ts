@@ -264,9 +264,9 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<YoutubeVideoRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     
-    let metricsQuery = supabaseAdmin
+    let metricsQuery = (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds");
+      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
 
     if (data.days !== null) {
       const from = new Date();
@@ -274,7 +274,10 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
       metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
     }
 
-    const { data: metrics, error: metricsError } = await metricsQuery;
+    const { data: metrics, error: metricsError } = (await metricsQuery) as {
+      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
+      error: { message: string } | null;
+    };
     if (metricsError) throw new Error(metricsError.message);
     if (!metrics || metrics.length === 0) return [];
 
@@ -339,9 +342,9 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
     // Instead of calling getYoutubeTopVideos which is wrapped by createServerFn, we'll fetch from db directly here
     // or just fetch all videos and metrics.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let metricsQuery = supabaseAdmin
+    let metricsQuery = (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, avg_view_duration_seconds");
+      .select("video_id, date, views, avg_view_duration_seconds") as any;
       
     if (data.days !== null) {
       const from = new Date();
@@ -349,7 +352,10 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
       metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
     }
     
-    const { data: metrics, error: metricsError } = await metricsQuery;
+    const { data: metrics, error: metricsError } = (await metricsQuery) as {
+      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
+      error: { message: string } | null;
+    };
     if (metricsError) throw new Error(metricsError.message);
     
     if (!metrics || metrics.length === 0) return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false };
@@ -455,6 +461,6 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
       date: r.date,
       amount: Number(r.amount),
       currency: r.currency,
-      source_type: r.source_type,
+      source_type: r.source_type ?? "",
     }));
   });

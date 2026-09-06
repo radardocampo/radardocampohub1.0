@@ -37,7 +37,6 @@ import {
   getYoutubeBestPostingTime,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
-import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const RANGES = [
@@ -82,6 +81,11 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   PROMOTED: "Promovido",
   EXTERNAL_APP: "App Externo",
 };
+
+const formatTrafficSource = (type: string) =>
+  TRAFFIC_SOURCE_LABELS[type] ?? type;
+
+
 
 /** Country code to name in Portuguese */
 const COUNTRY_NAMES: Record<string, string> = {
@@ -337,7 +341,7 @@ function MetricsPage() {
   }, [youtubePrevQuery.data]);
 
   const snapshots = useMemo(() => {
-    const mocks = buildSnapshots(days);
+    const mocks = buildSnapshots(days ?? 365);
     return mocks.map((snap) =>
       snap.id === "youtube"
         ? (youtubeSnapshot ?? {
