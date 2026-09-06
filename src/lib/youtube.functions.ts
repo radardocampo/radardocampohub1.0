@@ -503,6 +503,11 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
       .eq("platform_id", data.platform_id)
       .eq("period", data.period);
 
-    if (error) throw new Error(error.message);
+    // A tabela de metas ainda pode não existir no banco: nesse caso seguimos sem metas.
+    if (error) {
+      const msg = error.message ?? "";
+      if (error.code === "PGRST205" || msg.includes("growth_goals")) return [];
+      throw new Error(msg);
+    }
     return (goals ?? []) as GrowthGoal[];
   });
