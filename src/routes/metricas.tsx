@@ -35,6 +35,7 @@ import {
   getYoutubeTrafficSources,
   getYoutubeTopVideos,
   getYoutubeBestPostingTime,
+  getLatestSyncLog,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
@@ -133,6 +134,12 @@ function MetricsPage() {
   const fetchTrafficSources = useServerFn(getYoutubeTrafficSources);
   const fetchTopVideos = useServerFn(getYoutubeTopVideos);
   const fetchBestTime = useServerFn(getYoutubeBestPostingTime);
+  const fetchLatestSync = useServerFn(getLatestSyncLog);
+
+  const syncLogQuery = useQuery({
+    queryKey: ["sync-log", selected === "youtube" ? "youtube-sync" : selected],
+    queryFn: () => fetchLatestSync({ data: { platform_id: selected === "youtube" ? "youtube-sync" : selected } }),
+  });
 
   const historyExistsQuery = useQuery({
     queryKey: ["youtube-history-exists"],
@@ -211,6 +218,7 @@ function MetricsPage() {
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
+      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
@@ -254,6 +262,7 @@ function MetricsPage() {
       await queryClient.invalidateQueries({ queryKey: ["youtube-geography"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-traffic"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-videos"] });
+      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
@@ -290,10 +299,12 @@ function MetricsPage() {
 
     const totalViews = rows.reduce((acc, row) => acc + row.views, 0);
     const totalLikes = rows.reduce((acc, row) => acc + row.likes, 0);
+    const totalComments = rows.reduce((acc, row) => acc + (row.comments || 0), 0);
+    const totalShares = rows.reduce((acc, row) => acc + (row.shares || 0), 0);
     const totalWatchTime = rows.reduce((acc, row) => acc + (row.watch_time_hours || 0), 0);
     const totalAvd = rows.reduce((acc, row) => acc + (row.avd_seconds || 0), 0);
     const avgAvd = rows.length > 0 ? totalAvd / rows.length : 0;
-    const avgEngagement = totalViews > 0 ? Number(((totalLikes / totalViews) * 100).toFixed(2)) : 0;
+    const avgEngagement = totalViews > 0 ? Number((((totalLikes + totalComments) / totalViews) * 100).toFixed(2)) : 0;
     const totalSubsGained = rows.reduce((acc, row) => acc + (row.subs_gained || 0), 0);
     const totalSubsLost = rows.reduce((acc, row) => acc + (row.subs_lost || 0), 0);
     const totalRevenue = rows.reduce((acc, row) => acc + (row.estimated_revenue || 0), 0);
@@ -304,6 +315,8 @@ function MetricsPage() {
       followersDelta,
       views: totalViews,
       likes: totalLikes,
+      comments: totalComments,
+      shares: totalShares,
       engagement_rate: avgEngagement,
       watch_time_hours: totalWatchTime,
       avd_seconds: avgAvd,
@@ -321,10 +334,13 @@ function MetricsPage() {
     return {
       views: rows.reduce((acc, row) => acc + row.views, 0),
       likes: rows.reduce((acc, row) => acc + row.likes, 0),
+      comments: rows.reduce((acc, row) => acc + (row.comments || 0), 0),
+      shares: rows.reduce((acc, row) => acc + (row.shares || 0), 0),
       engagement_rate: (() => {
         const tv = rows.reduce((a, r) => a + r.views, 0);
         const tl = rows.reduce((a, r) => a + r.likes, 0);
-        return tv > 0 ? Number(((tl / tv) * 100).toFixed(2)) : 0;
+        const tc = rows.reduce((a, r) => a + (r.comments || 0), 0);
+        return tv > 0 ? Number((((tl + tc) / tv) * 100).toFixed(2)) : 0;
       })(),
     };
   }, [youtubePrevQuery.data]);
@@ -596,6 +612,21 @@ function MetricsPage() {
                   </TooltipContent>
                 </UITooltip>
               </TooltipProvider>
+              {syncLogQuery.data && (
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground bg-secondary/50 px-2 py-1 rounded-md">
+                  Última sync: há {
+                    (() => {
+                      const mins = Math.floor((new Date().getTime() - new Date(syncLogQuery.data.run_at).getTime()) / 60000);
+                      if (mins < 60) return `${mins}m`;
+                      if (mins < 1440) return `${Math.floor(mins/60)}h`;
+                      return `${Math.floor(mins/1440)}d`;
+                    })()
+                  }
+                  <span className={`flex items-center gap-1 font-medium ${syncLogQuery.data.status === 'success' ? 'text-success' : 'text-destructive'}`}>
+                    · {syncLogQuery.data.status === 'success' ? 'sucesso' : 'erro'}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <div className="flex gap-1 rounded-lg bg-secondary p-1">
@@ -658,7 +689,7 @@ function MetricsPage() {
                 hint={`+${current.followersDelta}% no período`}
               />
               <MetricTile
-                label="Views (Total no período)"
+                label="Views"
                 value={formatNumber(current.views)}
                 hint={
                   prevTotals
@@ -678,6 +709,30 @@ function MetricsPage() {
                   prevTotals
                     ? (() => {
                         const delta = pctChange(current.likes, prevTotals.likes);
+                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
+                      })()
+                    : "soma do período selecionado"
+                }
+              />
+              <MetricTile
+                label="Comentários"
+                value={formatNumber(current.comments || 0)}
+                hint={
+                  prevTotals
+                    ? (() => {
+                        const delta = pctChange(current.comments || 0, prevTotals.comments || 0);
+                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
+                      })()
+                    : "soma do período selecionado"
+                }
+              />
+              <MetricTile
+                label="Compartilhamentos"
+                value={formatNumber(current.shares || 0)}
+                hint={
+                  prevTotals
+                    ? (() => {
+                        const delta = pctChange(current.shares || 0, prevTotals.shares || 0);
                         return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
                       })()
                     : "soma do período selecionado"
@@ -1071,6 +1126,9 @@ function MetricsPage() {
                       <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("likes")}>
                         Curtidas {videoSort.key === "likes" ? (videoSort.desc ? "↓" : "↑") : ""}
                       </th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("comments")}>
+                        Comentários {videoSort.key === "comments" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
                       <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("watch_time_hours")}>
                         Tempo {videoSort.key === "watch_time_hours" ? (videoSort.desc ? "↓" : "↑") : ""}
                       </th>
@@ -1115,6 +1173,7 @@ function MetricsPage() {
                         </td>
                         <td className="py-3 font-semibold">{formatNumber(video.views)}</td>
                         <td className="py-3">{formatNumber(video.likes)}</td>
+                        <td className="py-3">{formatNumber(video.comments)}</td>
                         <td className="py-3">{formatNumber(video.watch_time_hours)}h</td>
                         <td className="py-3">{formatAvd(video.avg_view_duration_seconds)}</td>
                       </tr>

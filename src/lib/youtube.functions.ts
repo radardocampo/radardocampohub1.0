@@ -460,3 +460,26 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
       source_type: r.source_type,
     }));
   });
+
+export type SyncLogRow = {
+  platform_id: string;
+  status: string;
+  message: string;
+  run_at: string;
+};
+
+export const getLatestSyncLog = createServerFn({ method: "GET" })
+  .validator((data: { platform_id: string }) => data)
+  .handler(async ({ data }): Promise<SyncLogRow | null> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("sync_logs")
+      .select("platform_id, status, message, run_at")
+      .eq("platform_id", data.platform_id)
+      .order("run_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return row as SyncLogRow | null;
+  });
