@@ -5,13 +5,20 @@ import { useServerFn } from "@tanstack/react-start";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Video } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -19,7 +26,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { buildSnapshots, type MetricPoint, type PlatformSnapshot } from "@/lib/mock-data";
 import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform } from "@/lib/platforms";
 import { supabase } from "@/integrations/supabase/client";
-import { getYoutubeMetrics, checkYoutubeHistoryExists } from "@/lib/youtube.functions";
+import {
+  getYoutubeMetrics,
+  getYoutubeMetricsPrevious,
+  checkYoutubeHistoryExists,
+  getYoutubeAudience,
+  getYoutubeGeography,
+  getYoutubeTrafficSources,
+  getYoutubeTopVideos,
+  type YoutubeVideoRow,
+} from "@/lib/youtube.functions";
 
 const RANGES = [
   { days: 7, label: "7 dias" },
@@ -33,6 +49,44 @@ const tooltipStyle = {
   borderRadius: "0.75rem",
   color: "var(--popover-foreground)",
 } as const;
+
+/** Translate YouTube API traffic source types to Portuguese labels. */
+const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
+  YT_SEARCH: "Pesquisa do YouTube",
+  SUGGESTED: "Vídeos Sugeridos",
+  EXT_URL: "Tráfego Externo",
+  PLAYLIST: "Playlists",
+  SUBSCRIBER: "Feed de Inscritos",
+  NOTIFICATION: "Notificações",
+  YT_CHANNEL: "Página do Canal",
+  YT_OTHER_PAGE: "Outras Páginas YT",
+  NO_LINK_OTHER: "Outros (Direto)",
+  SHORTS: "Shorts",
+  END_SCREEN: "Telas Finais",
+  HASHTAGS: "Hashtags",
+  LIVE: "Ao Vivo",
+  RELATED_VIDEO: "Vídeos Relacionados",
+  CAMPAIGN_CARD: "Cards de Campanha",
+  ANNOTATION: "Anotações",
+  ADVERTISING: "Publicidade",
+  PROMOTED: "Promovido",
+  EXTERNAL_APP: "App Externo",
+};
+
+/** Country code to name in Portuguese */
+const COUNTRY_NAMES: Record<string, string> = {
+  BR: "Brasil", US: "Estados Unidos", PT: "Portugal", MX: "México",
+  AR: "Argentina", CO: "Colômbia", CL: "Chile", PE: "Peru",
+  DE: "Alemanha", FR: "França", ES: "Espanha", IT: "Itália",
+  GB: "Reino Unido", JP: "Japão", IN: "Índia", CA: "Canadá",
+  AU: "Austrália", AO: "Angola", MZ: "Moçambique", PY: "Paraguai",
+  UY: "Uruguai", BO: "Bolívia", EC: "Equador", VE: "Venezuela",
+};
+
+const PIE_COLORS = [
+  "#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF",
+  "#FF9F40", "#7BC8A4", "#E7A9D1", "#86CBDB", "#C4B5FD",
+];
 
 export const Route = createFileRoute("/metricas")({
   head: () => ({
@@ -55,13 +109,26 @@ export const Route = createFileRoute("/metricas")({
   component: MetricsPage,
 });
 
+/** Calculate percentage change between two values. */
+function pctChange(current: number, previous: number): number | null {
+  if (previous === 0) return current > 0 ? 100 : null;
+  return Number((((current - previous) / previous) * 100).toFixed(1));
+}
+
 function MetricsPage() {
   const [days, setDays] = useState<number>(30);
   const [selected, setSelected] = useState<string>("youtube");
+  const [videoFilter, setVideoFilter] = useState<"all" | "shorts" | "long">("all");
+  const [videoSort, setVideoSort] = useState<{ key: keyof YoutubeVideoRow; desc: boolean }>({ key: "views", desc: true });
   const queryClient = useQueryClient();
 
   const fetchYoutube = useServerFn(getYoutubeMetrics);
+  const fetchYoutubePrev = useServerFn(getYoutubeMetricsPrevious);
   const fetchHistoryExists = useServerFn(checkYoutubeHistoryExists);
+  const fetchAudience = useServerFn(getYoutubeAudience);
+  const fetchGeography = useServerFn(getYoutubeGeography);
+  const fetchTrafficSources = useServerFn(getYoutubeTrafficSources);
+  const fetchTopVideos = useServerFn(getYoutubeTopVideos);
 
   const historyExistsQuery = useQuery({
     queryKey: ["youtube-history-exists"],
@@ -73,6 +140,36 @@ function MetricsPage() {
     queryFn: () => fetchYoutube({ data: { days } }),
   });
 
+  const youtubePrevQuery = useQuery({
+    queryKey: ["youtube-metrics-prev", days],
+    queryFn: () => fetchYoutubePrev({ data: { days } }),
+  });
+
+  const audienceQuery = useQuery({
+    queryKey: ["youtube-audience"],
+    queryFn: () => fetchAudience(),
+    enabled: selected === "youtube",
+  });
+
+  const geographyQuery = useQuery({
+    queryKey: ["youtube-geography"],
+    queryFn: () => fetchGeography(),
+    enabled: selected === "youtube",
+  });
+
+  const trafficQuery = useQuery({
+    queryKey: ["youtube-traffic"],
+    queryFn: () => fetchTrafficSources(),
+    enabled: selected === "youtube",
+  });
+
+  const videosQuery = useQuery({
+    queryKey: ["youtube-videos"],
+    queryFn: () => fetchTopVideos(),
+    enabled: selected === "youtube",
+  });
+
+  // --- Sync mutation: daily metrics (existing button) ---
   const syncMutation = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
@@ -102,6 +199,7 @@ function MetricsPage() {
     onSuccess: async () => {
       toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
     },
     onError: (error: unknown) => {
@@ -110,11 +208,54 @@ function MetricsPage() {
     },
   });
 
+  // --- Sync mutation: audience + videos (new button) ---
+  const syncAudienceVideosMutation = useMutation({
+    mutationFn: async () => {
+      // Call audience sync
+      const { error: err1, data: d1 } = await supabase.functions.invoke("sync-youtube-audience", { method: "POST" });
+      if (err1) {
+        let detail = err1.message;
+        const response = (err1 as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+        }
+        throw new Error(`Audiência: ${detail}`);
+      }
+
+      // Call videos sync
+      const { error: err2, data: d2 } = await supabase.functions.invoke("sync-youtube-videos", { method: "POST" });
+      if (err2) {
+        let detail = err2.message;
+        const response = (err2 as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+        }
+        throw new Error(`Vídeos: ${detail}`);
+      }
+
+      return { audience: d1, videos: d2 };
+    },
+    onMutate: () => {
+      toast.info("Sincronizando audiência e vídeos...", { id: "sync-audience-videos" });
+    },
+    onSuccess: async () => {
+      toast.success("Audiência e vídeos sincronizados!", { id: "sync-audience-videos" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-audience"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-geography"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-traffic"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-videos"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha: ${message}`, { id: "sync-audience-videos", duration: 8000 });
+    },
+  });
+
+  // --- Compute current period metrics ---
   const youtubeSnapshot = useMemo(() => {
     const rows = youtubeQuery.data ?? [];
     if (rows.length === 0) return null;
 
-    // metrics_daily do YouTube agora guarda os dados diários (delta).
     const series: MetricPoint[] = rows.map((row) => {
       const parsed = new Date(`${row.date}T00:00:00`);
       return {
@@ -163,6 +304,20 @@ function MetricsPage() {
     } as any;
   }, [youtubeQuery.data]);
 
+  // --- Compute previous period for percentage changes ---
+  const prevTotals = useMemo(() => {
+    const rows = youtubePrevQuery.data ?? [];
+    if (rows.length === 0) return null;
+    return {
+      views: rows.reduce((acc, row) => acc + row.views, 0),
+      likes: rows.reduce((acc, row) => acc + row.likes, 0),
+      engagement_rate: (() => {
+        const tv = rows.reduce((a, r) => a + r.views, 0);
+        const tl = rows.reduce((a, r) => a + r.likes, 0);
+        return tv > 0 ? Number(((tl / tv) * 100).toFixed(2)) : 0;
+      })(),
+    };
+  }, [youtubePrevQuery.data]);
 
   const snapshots = useMemo(() => {
     const mocks = buildSnapshots(days);
@@ -191,11 +346,79 @@ function MetricsPage() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  // --- Find peak day for views annotation ---
+  const peakDay = useMemo(() => {
+    if (!isYoutube || !current.series || current.series.length === 0) return null;
+    let maxIdx = 0;
+    let maxViews = 0;
+    current.series.forEach((point: any, idx: number) => {
+      if (point.views > maxViews) {
+        maxViews = point.views;
+        maxIdx = idx;
+      }
+    });
+    const peakPoint = current.series[maxIdx] as any;
+    // Find closest published video to the peak date
+    const videos = videosQuery.data ?? [];
+    let closestVideo: YoutubeVideoRow | null = null;
+    let closestDist = Infinity;
+    const peakDate = new Date(peakPoint.date + "T00:00:00").getTime();
+    for (const v of videos) {
+      const dist = Math.abs(new Date(v.published_at).getTime() - peakDate);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestVideo = v;
+      }
+    }
+    // Only show annotation if video was published within 3 days of peak
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    return {
+      label: peakPoint.label,
+      views: maxViews,
+      videoTitle: closestVideo && closestDist <= threeDaysMs ? closestVideo.title : null,
+    };
+  }, [current.series, isYoutube, videosQuery.data]);
+
+  // --- Filtered and sorted videos ---
+  const filteredVideos = useMemo(() => {
+    const all = videosQuery.data ?? [];
+    let filtered = all;
+    if (videoFilter === "shorts") filtered = all.filter((v) => v.duration_seconds <= 60);
+    else if (videoFilter === "long") filtered = all.filter((v) => v.duration_seconds > 60);
+
+    return [...filtered].sort((a, b) => {
+      const aVal = a[videoSort.key];
+      const bVal = b[videoSort.key];
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        return videoSort.desc ? bVal - aVal : aVal - bVal;
+      }
+      return videoSort.desc
+        ? String(bVal).localeCompare(String(aVal))
+        : String(aVal).localeCompare(String(bVal));
+    });
+  }, [videosQuery.data, videoFilter, videoSort]);
+
+  // --- Audience chart data ---
+  const audienceChartData = useMemo(() => {
+    const rows = audienceQuery.data ?? [];
+    if (rows.length === 0) return [];
+    const ageGroups = [...new Set(rows.map((r) => r.age_group))].sort();
+    return ageGroups.map((age) => {
+      const entry: Record<string, any> = { age_group: age.replace("age", "") };
+      for (const r of rows) {
+        if (r.age_group === age) {
+          entry[r.gender] = r.viewer_percentage;
+        }
+      }
+      return entry;
+    });
+  }, [audienceQuery.data]);
+
   const renderEvolutionCharts = (seriesData: any[]) => {
     if (seriesData.length === 0) {
       return (
         <p className="mt-8 text-base text-muted-foreground">
-          Sem dados no período selecionado. Clique em “Sincronizar agora” para baixar as métricas.
+          Sem dados no período selecionado. Clique em "Sincronizar agora" para baixar as métricas.
         </p>
       );
     }
@@ -239,6 +462,25 @@ function MetricsPage() {
                 strokeWidth={3}
                 fill="url(#viewsFill)"
               />
+              {peakDay && (
+                <ReferenceDot
+                  x={peakDay.label}
+                  y={peakDay.views}
+                  r={6}
+                  fill={meta.color}
+                  stroke="var(--background)"
+                  strokeWidth={2}
+                  label={{
+                    value: peakDay.videoTitle
+                      ? `📈 ${peakDay.videoTitle.slice(0, 30)}${peakDay.videoTitle.length > 30 ? "…" : ""}`
+                      : "📈 Pico",
+                    position: "top",
+                    fill: "var(--foreground)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -288,6 +530,12 @@ function MetricsPage() {
     );
   };
 
+  const toggleSort = (key: keyof YoutubeVideoRow) => {
+    setVideoSort((prev) =>
+      prev.key === key ? { key, desc: !prev.desc } : { key, desc: true }
+    );
+  };
+
   return (
     <AppShell
       title="Métricas"
@@ -295,16 +543,28 @@ function MetricsPage() {
       actions={
         <div className="flex flex-wrap items-center gap-3">
           {isYoutube && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
-              className="gap-2"
-            >
-              <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-              Sincronizar agora
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                className="gap-2"
+              >
+                <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                Sincronizar agora
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => syncAudienceVideosMutation.mutate()}
+                disabled={syncAudienceVideosMutation.isPending}
+                className="gap-2"
+              >
+                <Video className={`size-4 ${syncAudienceVideosMutation.isPending ? "animate-spin" : ""}`} />
+                Sincronizar Audiência e Vídeos
+              </Button>
+            </>
           )}
           <div className="flex gap-1 rounded-lg bg-secondary p-1">
             {RANGES.map((range) => (
@@ -348,12 +608,16 @@ function MetricsPage() {
 
       {isYoutube ? (
         <Tabs defaultValue="geral" className="mt-8">
-          <TabsList className="mb-6 grid w-full max-w-[500px] grid-cols-3">
+          <TabsList className="mb-6 grid w-full max-w-[640px] grid-cols-4">
             <TabsTrigger value="geral">Visão Geral</TabsTrigger>
             <TabsTrigger value="retencao">Retenção</TabsTrigger>
             <TabsTrigger value="audiencia">Audiência</TabsTrigger>
+            <TabsTrigger value="videos">Vídeos</TabsTrigger>
           </TabsList>
           
+          {/* ============================================================
+              TAB: VISÃO GERAL
+              ============================================================ */}
           <TabsContent value="geral">
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
               <MetricTile
@@ -364,15 +628,28 @@ function MetricsPage() {
               <MetricTile
                 label="Views (Total no período)"
                 value={formatNumber(current.views)}
-                hint={(youtubeQuery.data?.length ?? 0) < 2
-                    ? "acumulando dados desde hoje"
-                    : "soma do período selecionado"
+                hint={
+                  prevTotals
+                    ? (() => {
+                        const delta = pctChange(current.views, prevTotals.views);
+                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
+                      })()
+                    : (youtubeQuery.data?.length ?? 0) < 2
+                      ? "acumulando dados desde hoje"
+                      : "soma do período selecionado"
                 }
               />
               <MetricTile
                 label="Curtidas"
                 value={formatNumber(current.likes)}
-                hint="soma do período selecionado"
+                hint={
+                  prevTotals
+                    ? (() => {
+                        const delta = pctChange(current.likes, prevTotals.likes);
+                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
+                      })()
+                    : "soma do período selecionado"
+                }
               />
             </div>
             <section className="panel mt-10 p-6">
@@ -390,6 +667,9 @@ function MetricsPage() {
             </section>
           </TabsContent>
 
+          {/* ============================================================
+              TAB: RETENÇÃO
+              ============================================================ */}
           <TabsContent value="retencao">
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-2">
               <MetricTile
@@ -457,7 +737,11 @@ function MetricsPage() {
             </section>
           </TabsContent>
 
+          {/* ============================================================
+              TAB: AUDIÊNCIA
+              ============================================================ */}
           <TabsContent value="audiencia">
+            {/* Existing: subscriber flow cards */}
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-2">
               <MetricTile
                 label="Inscritos Ganhos"
@@ -471,6 +755,7 @@ function MetricsPage() {
               />
             </div>
             
+            {/* Existing: subscriber flow chart */}
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">
                 Fluxo de Inscritos
@@ -535,6 +820,226 @@ function MetricsPage() {
                 </div>
               )}
             </section>
+
+            {/* NEW: Demographics (age × gender bar chart) */}
+            <section className="panel mt-10 p-6">
+              <h2 className="text-2xl font-semibold">Demografia</h2>
+              <p className="text-base text-muted-foreground mt-1">
+                Distribuição de audiência por faixa etária e gênero.
+              </p>
+              {audienceQuery.isLoading ? (
+                <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+              ) : audienceChartData.length === 0 ? (
+                <p className="mt-8 text-base text-muted-foreground">
+                  Dados insuficientes para este período. A API do YouTube pode não retornar dados demográficos para canais menores ou períodos curtos.
+                </p>
+              ) : (
+                <div className="mt-8 h-[340px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={audienceChartData}>
+                      <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
+                      <XAxis dataKey="age_group" stroke="var(--muted-foreground)" fontSize={13} />
+                      <YAxis stroke="var(--muted-foreground)" fontSize={13} width={56} tickFormatter={(v: number) => `${v}%`} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [`${value}%`, ""]} />
+                      <Legend />
+                      <Bar dataKey="male" name="Masculino" fill="#36A2EB" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="female" name="Feminino" fill="#FF6384" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </section>
+
+            {/* NEW: Geography (top countries table) */}
+            <section className="panel mt-10 p-6">
+              <h2 className="text-2xl font-semibold">Top Países por Views</h2>
+              <p className="text-base text-muted-foreground mt-1">
+                Distribuição geográfica da audiência nos últimos 30 dias.
+              </p>
+              {geographyQuery.isLoading ? (
+                <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+              ) : (geographyQuery.data?.length ?? 0) === 0 ? (
+                <p className="mt-8 text-base text-muted-foreground">
+                  Dados insuficientes para este período.
+                </p>
+              ) : (
+                <table className="mt-6 w-full text-base">
+                  <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="pb-4">País</th>
+                      <th className="pb-4">Views</th>
+                      <th className="pb-4">Tempo (min)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(geographyQuery.data ?? []).map((row) => (
+                      <tr key={row.country_code} className="border-t border-border/50 hover:bg-surface-2 transition-colors">
+                        <td className="py-3 font-medium">
+                          {COUNTRY_NAMES[row.country_code] || row.country_code}
+                        </td>
+                        <td className="py-3">{formatFull(row.views)}</td>
+                        <td className="py-3">{formatNumber(row.watch_time_minutes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            {/* NEW: Traffic Sources (horizontal bar or pie chart) */}
+            <section className="panel mt-10 p-6">
+              <h2 className="text-2xl font-semibold">Origens de Tráfego</h2>
+              <p className="text-base text-muted-foreground mt-1">
+                De onde vêm as visualizações nos últimos 30 dias.
+              </p>
+              {trafficQuery.isLoading ? (
+                <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+              ) : (trafficQuery.data?.length ?? 0) === 0 ? (
+                <p className="mt-8 text-base text-muted-foreground">
+                  Dados insuficientes para este período.
+                </p>
+              ) : (
+                <div className="mt-8 grid gap-8 lg:grid-cols-2">
+                  {/* Horizontal bar chart */}
+                  <div className="h-[400px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={(trafficQuery.data ?? []).map((r) => ({
+                          name: TRAFFIC_SOURCE_LABELS[r.traffic_source_type] || r.traffic_source_type,
+                          views: r.views,
+                        }))}
+                        layout="vertical"
+                        margin={{ left: 120 }}
+                      >
+                        <CartesianGrid stroke="var(--border)" horizontal={false} strokeDasharray="4 4" />
+                        <XAxis type="number" stroke="var(--muted-foreground)" fontSize={13} tickFormatter={(v: number) => formatNumber(v)} />
+                        <YAxis type="category" dataKey="name" stroke="var(--muted-foreground)" fontSize={12} width={110} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [formatFull(value), "Views"]} />
+                        <Bar dataKey="views" fill={meta.color} radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {/* Pie chart */}
+                  <div className="h-[400px] flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={(trafficQuery.data ?? []).map((r) => ({
+                            name: TRAFFIC_SOURCE_LABELS[r.traffic_source_type] || r.traffic_source_type,
+                            value: r.views,
+                          }))}
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={130}
+                          dataKey="value"
+                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          labelLine={false}
+                        >
+                          {(trafficQuery.data ?? []).map((_, idx) => (
+                            <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [formatFull(value), "Views"]} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </section>
+          </TabsContent>
+
+          {/* ============================================================
+              TAB: VÍDEOS
+              ============================================================ */}
+          <TabsContent value="videos">
+            <div className="flex flex-wrap items-center gap-3 mb-6">
+              <div className="flex gap-1 rounded-lg bg-secondary p-1">
+                {(["all", "long", "shorts"] as const).map((f) => (
+                  <Button
+                    key={f}
+                    size="sm"
+                    variant={videoFilter === f ? "default" : "ghost"}
+                    onClick={() => setVideoFilter(f)}
+                    className="px-4 text-sm font-medium"
+                  >
+                    {f === "all" ? "Todos" : f === "shorts" ? "Shorts (≤ 60s)" : "Vídeos Longos"}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {filteredVideos.length} vídeo{filteredVideos.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+
+            {videosQuery.isLoading ? (
+              <p className="text-base text-muted-foreground">Carregando vídeos...</p>
+            ) : filteredVideos.length === 0 ? (
+              <p className="text-base text-muted-foreground">
+                Nenhum vídeo encontrado. Clique em "Sincronizar Audiência e Vídeos" para buscar os dados.
+              </p>
+            ) : (
+              <div className="overflow-x-auto panel p-4">
+                <table className="w-full min-w-[900px] text-base">
+                  <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="pb-4 pl-2">Vídeo</th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("published_at")}>
+                        Data {videoSort.key === "published_at" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("views")}>
+                        Views {videoSort.key === "views" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("likes")}>
+                        Curtidas {videoSort.key === "likes" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("watch_time_hours")}>
+                        Tempo {videoSort.key === "watch_time_hours" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
+                      <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("avg_view_duration_seconds")}>
+                        AVD {videoSort.key === "avg_view_duration_seconds" ? (videoSort.desc ? "↓" : "↑") : ""}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredVideos.map((video) => (
+                      <tr
+                        key={video.video_id}
+                        className="border-t border-border/50 hover:bg-surface-2 transition-colors"
+                      >
+                        <td className="py-3 pl-2">
+                          <div className="flex items-center gap-3">
+                            {video.thumbnail_url && (
+                              <img
+                                src={video.thumbnail_url}
+                                alt=""
+                                className="h-12 w-20 rounded-md object-cover flex-shrink-0"
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-medium truncate max-w-[280px]" title={video.title}>
+                                {video.title}
+                              </p>
+                              {video.duration_seconds <= 60 && (
+                                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                                  Short
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 text-sm text-muted-foreground whitespace-nowrap">
+                          {new Date(video.published_at).toLocaleDateString("pt-BR")}
+                        </td>
+                        <td className="py-3 font-semibold">{formatNumber(video.views)}</td>
+                        <td className="py-3">{formatNumber(video.likes)}</td>
+                        <td className="py-3">{formatNumber(video.watch_time_hours)}h</td>
+                        <td className="py-3">{formatAvd(video.avg_view_duration_seconds)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       ) : (
@@ -574,8 +1079,14 @@ function MetricsPage() {
         </>
       )}
 
+      {/* Comparativo entre plataformas — rendered once, outside Tabs */}
       <section className="panel mt-10 overflow-x-auto p-6">
-        <h2 className="text-2xl font-semibold">Comparativo entre plataformas</h2>
+        <div className="flex items-baseline gap-4 flex-wrap">
+          <h2 className="text-2xl font-semibold">Comparativo entre plataformas</h2>
+          <p className="text-sm text-muted-foreground max-w-lg">
+            Engajamento calculado de forma distinta por plataforma; compare tendências, não valores absolutos.
+          </p>
+        </div>
         <table className="mt-6 w-full min-w-[720px] text-base">
           <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             <tr>

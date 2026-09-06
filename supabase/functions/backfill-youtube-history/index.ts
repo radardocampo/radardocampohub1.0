@@ -72,6 +72,7 @@ serve(async (req) => {
 
     // 3. YouTube Analytics API chunked by year
     const dailyData: Record<string, any> = {};
+    let revenueAvailable = true;
 
     for (let year = startYear; year <= currentYear; year++) {
       let startDateStr = `${year}-01-01`;
@@ -88,29 +89,61 @@ serve(async (req) => {
         continue;
       }
 
+      // NOTE: Impressions and thumbnail CTR are NOT available in the YouTube Analytics API.
+      const baseMetrics = "views,likes,comments,shares,subscribersGained,subscribersLost,estimatedMinutesWatched,averageViewDuration";
+      const metricsStr = revenueAvailable ? baseMetrics + ",estimatedRevenue" : baseMetrics;
+
       const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
       analyticsUrl.searchParams.append("ids", "channel==MINE");
       analyticsUrl.searchParams.append("startDate", startDateStr);
       analyticsUrl.searchParams.append("endDate", endDateStr);
-      analyticsUrl.searchParams.append("metrics", "views,likes,comments,shares,subscribersGained,subscribersLost,estimatedMinutesWatched,averageViewDuration");
+      analyticsUrl.searchParams.append("metrics", metricsStr);
       analyticsUrl.searchParams.append("dimensions", "day");
 
-      const analyticsResponse = await fetch(analyticsUrl.toString(), {
+      let analyticsResponse = await fetch(analyticsUrl.toString(), {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
         },
       });
 
-      const analyticsResult = await analyticsResponse.json();
+      let analyticsResult = await analyticsResponse.json();
 
+      // If revenue request failed (403 = not monetized / missing scope), retry without it
       if (!analyticsResponse.ok) {
-        throw new Error(`Analytics API error for year ${year}: ${JSON.stringify(analyticsResult)}`);
+        if (revenueAvailable && (analyticsResponse.status === 403 || analyticsResponse.status === 400)) {
+          console.warn(`Revenue metrics unavailable for year ${year}, retrying without estimatedRevenue`);
+          revenueAvailable = false;
+          const retryUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+          retryUrl.searchParams.append("ids", "channel==MINE");
+          retryUrl.searchParams.append("startDate", startDateStr);
+          retryUrl.searchParams.append("endDate", endDateStr);
+          retryUrl.searchParams.append("metrics", baseMetrics);
+          retryUrl.searchParams.append("dimensions", "day");
+          analyticsResponse = await fetch(retryUrl.toString(), {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: "application/json",
+            },
+          });
+          analyticsResult = await analyticsResponse.json();
+          if (!analyticsResponse.ok) {
+            throw new Error(`Analytics API error for year ${year}: ${JSON.stringify(analyticsResult)}`);
+          }
+          await supabase.from("sync_logs").insert({
+            platform_id: "youtube-backfill",
+            status: "warning",
+            message: "estimatedRevenue not available (channel not monetized or missing scope). Synced other metrics normally.",
+            run_at: new Date().toISOString(),
+          });
+        } else {
+          throw new Error(`Analytics API error for year ${year}: ${JSON.stringify(analyticsResult)}`);
+        }
       }
 
       if (analyticsResult.rows) {
         for (const row of analyticsResult.rows) {
-          // row: [day, views, likes, comments, shares, subscribersGained, subscribersLost, estimatedMinutesWatched, averageViewDuration]
+          // row: [day, views, likes, comments, shares, subscribersGained, subscribersLost, estimatedMinutesWatched, averageViewDuration, (estimatedRevenue if available)]
           const day = row[0];
           dailyData[day] = {
             views: row[1] || 0,
@@ -121,7 +154,7 @@ serve(async (req) => {
             subscribersLost: row[6] || 0,
             estimatedMinutesWatched: row[7] || 0,
             averageViewDuration: row[8] || 0,
-            estimatedRevenue: 0,
+            estimatedRevenue: revenueAvailable ? (row[9] ?? null) : null,
             raw: row,
           };
         }
@@ -144,7 +177,7 @@ serve(async (req) => {
     const metricsToUpsert = [];
     let runningSubscribers = currentSubscribers;
 
-    let lastKnownData = { views: 0, likes: 0, comments: 0, shares: 0, subscribersGained: 0, subscribersLost: 0, estimatedMinutesWatched: 0, averageViewDuration: 0, estimatedRevenue: 0, raw: null };
+    let lastKnownData = { views: 0, likes: 0, comments: 0, shares: 0, subscribersGained: 0, subscribersLost: 0, estimatedMinutesWatched: 0, averageViewDuration: 0, estimatedRevenue: null as number | null, raw: null };
     // Encontrar o dia mais recente com dados para inicializar
     for (const date of allDates) {
       if (dailyData[date]) {
