@@ -88,7 +88,6 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   EXTERNAL_APP: "App Externo",
 };
 
-const formatTrafficSource = (type: string) => TRAFFIC_SOURCE_LABELS[type] ?? type;
 
 
 
@@ -1069,7 +1068,7 @@ function MetricsPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={(trafficQuery.data ?? []).map((r) => ({
-                          name: formatTrafficSource(r.traffic_source_type),
+                          name: TRAFFIC_SOURCE_LABELS[r.traffic_source_type] ?? r.traffic_source_type,
                           views: r.views,
                         }))}
                         layout="vertical"
