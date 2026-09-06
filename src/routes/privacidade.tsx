@@ -33,15 +33,15 @@ function PrivacidadePage() {
         <p>
           O Radar do Campo Hub coleta métricas públicas das redes sociais conectadas (YouTube,
           TikTok, Instagram e outras), como número de seguidores, visualizações, curtidas,
-          comentários e taxas de engajamento. Esses dados são obtidos por meio das APIs oficiais
-          das plataformas e armazenados apenas para uso interno de gestão de conteúdo.
+          comentários e taxas de engajamento. Esses dados são obtidos por meio das APIs oficiais das
+          plataformas e armazenados apenas para uso interno de gestão de conteúdo.
         </p>
 
         <h2 className="mt-6 text-lg font-semibold">2. Uso das informações</h2>
         <p>
           As métricas coletadas são utilizadas exclusivamente para análise de desempenho,
-          planejamento editorial e acompanhamento de crescimento dos canais vinculados ao Radar
-          do Campo. Não utilizamos esses dados para finalidades comerciais externas nem para
+          planejamento editorial e acompanhamento de crescimento dos canais vinculados ao Radar do
+          Campo. Não utilizamos esses dados para finalidades comerciais externas nem para
           perfilamento de usuários.
         </p>
 
