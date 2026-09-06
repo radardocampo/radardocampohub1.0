@@ -24,7 +24,7 @@ import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { buildSnapshots, type MetricPoint, type PlatformSnapshot } from "@/lib/mock-data";
-import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform } from "@/lib/platforms";
+import { CONTENT_PLATFORMS, formatFull, formatNumber, getPlatform, type PlatformId } from "@/lib/platforms";
 import { supabase } from "@/integrations/supabase/client";
 import {
   getYoutubeMetrics,
@@ -87,6 +87,8 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   PROMOTED: "Promovido",
   EXTERNAL_APP: "App Externo",
 };
+
+const formatTrafficSource = (type: string) => TRAFFIC_SOURCE_LABELS[type] ?? type;
 
 
 
@@ -357,7 +359,7 @@ function MetricsPage() {
   }, [youtubePrevQuery.data]);
 
   const snapshots = useMemo(() => {
-    const mocks = buildSnapshots(days);
+    const mocks = buildSnapshots(days ?? 365);
     return mocks.map((snap) =>
       snap.id === "youtube"
         ? (youtubeSnapshot ?? {
@@ -1196,13 +1198,13 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Shorts (≤ 3m)"
                     value={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
+                      const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "N/A";
                       const avgViews = shorts.reduce((acc, v) => acc + v.views, 0) / shorts.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
+                      const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "";
                       const avgAvd = shorts.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / shorts.length;
                       return `${formatAvd(avgAvd)} retenção média`;
@@ -1211,13 +1213,13 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Vídeos Longos (> 3m)"
                     value={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
+                      const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "N/A";
                       const avgViews = longs.reduce((acc, v) => acc + v.views, 0) / longs.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
+                      const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "";
                       const avgAvd = longs.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / longs.length;
                       return `${formatAvd(avgAvd)} retenção média`;
