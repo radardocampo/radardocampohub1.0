@@ -341,7 +341,7 @@ function MetricsPage() {
   }, [youtubePrevQuery.data]);
 
   const snapshots = useMemo(() => {
-    const mocks = buildSnapshots(days);
+    const mocks = buildSnapshots(days ?? 365);
     return mocks.map((snap) =>
       snap.id === "youtube"
         ? (youtubeSnapshot ?? {
