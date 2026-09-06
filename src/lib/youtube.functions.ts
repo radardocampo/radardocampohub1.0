@@ -353,7 +353,7 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
     }
     
     const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<{ video_id: string; date: string; views: number; avg_view_duration_seconds: number }> | null;
+      data: Array<Record<string, any>> | null;
       error: { message: string } | null;
     };
     if (metricsError) throw new Error(metricsError.message);
