@@ -71,6 +71,7 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   YT_OTHER_PAGE: "Outras Páginas YT",
   NO_LINK_OTHER: "Outros (Direto)",
   SHORTS: "Shorts",
+  SHORTS_CONTENT_LINKS: "Links de Conteúdo Shorts",
   END_SCREEN: "Telas Finais",
   HASHTAGS: "Hashtags",
   LIVE: "Ao Vivo",
@@ -84,18 +85,6 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
 
 const formatTrafficSource = (type: string) =>
   TRAFFIC_SOURCE_LABELS[type] ?? type;
-
-
-
-/** Country code to name in Portuguese */
-const COUNTRY_NAMES: Record<string, string> = {
-  BR: "Brasil", US: "Estados Unidos", PT: "Portugal", MX: "México",
-  AR: "Argentina", CO: "Colômbia", CL: "Chile", PE: "Peru",
-  DE: "Alemanha", FR: "França", ES: "Espanha", IT: "Itália",
-  GB: "Reino Unido", JP: "Japão", IN: "Índia", CA: "Canadá",
-  AU: "Austrália", AO: "Angola", MZ: "Moçambique", PY: "Paraguai",
-  UY: "Uruguai", BO: "Bolívia", EC: "Equador", VE: "Venezuela",
-};
 
 const PIE_COLORS = [
   "#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF",
@@ -603,6 +592,7 @@ function MetricsPage() {
     <AppShell
       title="Métricas"
       subtitle="Audiência e engajamento por plataforma."
+      hideDemoWarning={isYoutube}
       actions={
         <div className="flex flex-wrap items-center gap-3">
           {isYoutube && (
@@ -1256,6 +1246,11 @@ function MetricsPage() {
                     <span className="flex items-center gap-3 font-medium">
                       <Icon className={`size-5 ${row.textClass}`} />
                       {row.name}
+                      {snap.id !== "youtube" && (
+                        <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          Demonstração
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="py-4 font-semibold">{formatFull(snap.followers)}</td>
