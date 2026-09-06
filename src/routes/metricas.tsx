@@ -83,6 +83,11 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   EXTERNAL_APP: "App Externo",
 };
 
+const formatTrafficSource = (type: string) =>
+  TRAFFIC_SOURCE_LABELS[type] ?? type;
+
+
+
 /** Country code to name in Portuguese */
 const COUNTRY_NAMES: Record<string, string> = {
   BR: "Brasil", US: "Estados Unidos", PT: "Portugal", MX: "México",
