@@ -1,7 +1,8 @@
 {
   "deno.enable": false,
   "deno.enablePaths": [
-    "supabase/functions"
+    "supabase/functions",
+    "supabase/functions/auth-tiktok-callback"
   ],
   "deno.unstable": true
 }
