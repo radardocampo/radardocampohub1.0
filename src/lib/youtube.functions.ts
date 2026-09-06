@@ -339,9 +339,9 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
     // Instead of calling getYoutubeTopVideos which is wrapped by createServerFn, we'll fetch from db directly here
     // or just fetch all videos and metrics.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let metricsQuery = supabaseAdmin
+    let metricsQuery = (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, avg_view_duration_seconds");
+      .select("video_id, date, views, avg_view_duration_seconds") as any;
       
     if (data.days !== null) {
       const from = new Date();
