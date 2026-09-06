@@ -264,9 +264,9 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<YoutubeVideoRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     
-    let metricsQuery = supabaseAdmin
+    let metricsQuery = (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds");
+      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
 
     if (data.days !== null) {
       const from = new Date();
@@ -275,7 +275,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     }
 
     const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<{ video_id: string; date: string; views: number; avg_view_duration_seconds: number }> | null;
+      data: Array<Record<string, any>> | null;
       error: { message: string } | null;
     };
     if (metricsError) throw new Error(metricsError.message);
