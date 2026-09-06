@@ -41,10 +41,10 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-backfill",
+        platform_id: "youtube-sync",
         status: "error",
-        error_message: `Refresh token failed: ${JSON.stringify(tokenData)}`,
-        created_at: new Date().toISOString(),
+        message: `Refresh token failed: ${JSON.stringify(tokenData)}`,
+        run_at: new Date().toISOString(),
       });
       return new Response(JSON.stringify({ error: "Falha na autenticação do YouTube" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -54,9 +54,9 @@ serve(async (req) => {
 
     const accessToken = tokenData.access_token;
 
-    // 2. Discover channel creation date & current subscribers
+    // 2. Discover current subscribers
     const channelResponse = await fetch(
-      `https://youtube.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${apiKey}`
+      `https://youtube.googleapis.com/youtube/v3/channels?part=statistics&id=${channelId}&key=${apiKey}`
     );
     const channelData = await channelResponse.json();
 
@@ -64,77 +64,60 @@ serve(async (req) => {
       throw new Error("Channel not found or API error: " + JSON.stringify(channelData));
     }
 
-    const publishedAtStr = channelData.items[0].snippet.publishedAt;
     const currentSubscribers = Number(channelData.items[0].statistics.subscriberCount || 0);
-    const creationDate = new Date(publishedAtStr);
-    const startYear = creationDate.getFullYear();
-    const currentYear = new Date().getFullYear();
 
-    // 3. YouTube Analytics API chunked by year
+    // 3. YouTube Analytics API for the last 14 days
     const dailyData: Record<string, any> = {};
+    const today = new Date();
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(today.getDate() - 14);
 
-    for (let year = startYear; year <= currentYear; year++) {
-      let startDateStr = `${year}-01-01`;
-      let endDateStr = `${year}-12-31`;
+    const startDateStr = fourteenDaysAgo.toISOString().split("T")[0];
+    const endDateStr = today.toISOString().split("T")[0];
 
-      if (year === startYear) {
-        startDateStr = creationDate.toISOString().split("T")[0];
-      }
-      if (year === currentYear) {
-        endDateStr = new Date().toISOString().split("T")[0];
-      }
+    const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+    analyticsUrl.searchParams.append("ids", "channel==MINE");
+    analyticsUrl.searchParams.append("startDate", startDateStr);
+    analyticsUrl.searchParams.append("endDate", endDateStr);
+    analyticsUrl.searchParams.append("metrics", "views,likes,comments,shares,subscribersGained,subscribersLost,estimatedMinutesWatched,averageViewDuration");
+    analyticsUrl.searchParams.append("dimensions", "day");
 
-      if (new Date(startDateStr) > new Date(endDateStr)) {
-        continue;
-      }
+    const analyticsResponse = await fetch(analyticsUrl.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
 
-      const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
-      analyticsUrl.searchParams.append("ids", "channel==MINE");
-      analyticsUrl.searchParams.append("startDate", startDateStr);
-      analyticsUrl.searchParams.append("endDate", endDateStr);
-      analyticsUrl.searchParams.append("metrics", "views,likes,comments,shares,subscribersGained,subscribersLost,estimatedMinutesWatched,averageViewDuration");
-      analyticsUrl.searchParams.append("dimensions", "day");
+    const analyticsResult = await analyticsResponse.json();
 
-      const analyticsResponse = await fetch(analyticsUrl.toString(), {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: "application/json",
-        },
-      });
+    if (!analyticsResponse.ok) {
+      throw new Error(`Analytics API error: ${JSON.stringify(analyticsResult)}`);
+    }
 
-      const analyticsResult = await analyticsResponse.json();
-
-      if (!analyticsResponse.ok) {
-        throw new Error(`Analytics API error for year ${year}: ${JSON.stringify(analyticsResult)}`);
-      }
-
-      if (analyticsResult.rows) {
-        for (const row of analyticsResult.rows) {
-          // row: [day, views, likes, comments, shares, subscribersGained, subscribersLost, estimatedMinutesWatched, averageViewDuration]
-          const day = row[0];
-          dailyData[day] = {
-            views: row[1] || 0,
-            likes: row[2] || 0,
-            comments: row[3] || 0,
-            shares: row[4] || 0,
-            subscribersGained: row[5] || 0,
-            subscribersLost: row[6] || 0,
-            estimatedMinutesWatched: row[7] || 0,
-            averageViewDuration: row[8] || 0,
-            estimatedRevenue: 0,
-            raw: row,
-          };
-        }
+    if (analyticsResult.rows) {
+      for (const row of analyticsResult.rows) {
+        // row: [day, views, likes, comments, shares, subscribersGained, subscribersLost, estimatedMinutesWatched, averageViewDuration]
+        const day = row[0];
+        dailyData[day] = {
+          views: row[1] || 0,
+          likes: row[2] || 0,
+          comments: row[3] || 0,
+          shares: row[4] || 0,
+          subscribersGained: row[5] || 0,
+          subscribersLost: row[6] || 0,
+          estimatedMinutesWatched: row[7] || 0,
+          averageViewDuration: row[8] || 0,
+          estimatedRevenue: 0,
+          raw: row,
+        };
       }
     }
 
-    // 4. Reconstruct backward and 5. Handle gaps
-    const todayStr = new Date().toISOString().split("T")[0];
-    const creationDateStr = creationDate.toISOString().split("T")[0];
-    
+    // 4. Reconstruct backward (only for the last 14 days)
     const allDates: string[] = [];
     let currentDate = new Date();
-    const endDate = new Date(creationDateStr);
+    const endDate = new Date(startDateStr);
     
     while (currentDate >= endDate) {
       allDates.push(currentDate.toISOString().split("T")[0]);
@@ -145,7 +128,8 @@ serve(async (req) => {
     let runningSubscribers = currentSubscribers;
 
     let lastKnownData = { views: 0, likes: 0, comments: 0, shares: 0, subscribersGained: 0, subscribersLost: 0, estimatedMinutesWatched: 0, averageViewDuration: 0, estimatedRevenue: 0, raw: null };
-    // Encontrar o dia mais recente com dados para inicializar
+    
+    // Find most recent day with data
     for (const date of allDates) {
       if (dailyData[date]) {
         lastKnownData = dailyData[date];
@@ -156,10 +140,9 @@ serve(async (req) => {
     for (const date of allDates) {
       let dataForDay = dailyData[date];
       if (!dataForDay) {
-        // Preenche a lacuna com o valor do dia anterior (último conhecido) para evitar queda para zero
         dataForDay = {
           ...lastKnownData,
-          subscribersGained: 0, // Não duplicar ganhos/perdas
+          subscribersGained: 0,
           subscribersLost: 0,
           raw: null
         };
@@ -190,38 +173,24 @@ serve(async (req) => {
         synced_at: new Date().toISOString(),
       });
 
-      // previous_day = current_day - gained + lost
       runningSubscribers = runningSubscribers - dataForDay.subscribersGained + dataForDay.subscribersLost;
       if (runningSubscribers < 0) runningSubscribers = 0;
     }
 
-    // 6. Delete old data and Upsert new in metrics_daily
-    const { error: deleteError } = await supabase
+    // 5. Upsert
+    const { error } = await supabase
       .from("metrics_daily")
-      .delete()
-      .eq("platform_id", "youtube");
+      .upsert(metricsToUpsert, { onConflict: "platform_id,date" });
       
-    if (deleteError) {
-      console.warn("Failed to delete existing historical data:", deleteError.message);
-    }
-
-    const chunkSize = 1000;
-    for (let i = 0; i < metricsToUpsert.length; i += chunkSize) {
-      const chunk = metricsToUpsert.slice(i, i + chunkSize);
-      const { error } = await supabase
-        .from("metrics_daily")
-        .upsert(chunk, { onConflict: "platform_id,date" });
-        
-      if (error) {
-        throw new Error(`Failed to upsert metrics chunk: ${error.message}`);
-      }
+    if (error) {
+      throw new Error(`Failed to upsert metrics: ${error.message}`);
     }
     
     await supabase.from("sync_logs").insert({
-        platform_id: "youtube-backfill",
+        platform_id: "youtube-sync",
         status: "success",
-        records_processed: metricsToUpsert.length,
-        created_at: new Date().toISOString(),
+        message: `Processed ${metricsToUpsert.length} days`,
+        run_at: new Date().toISOString(),
     });
 
     return new Response(JSON.stringify({ success: true, processed: metricsToUpsert.length }), {
@@ -229,14 +198,14 @@ serve(async (req) => {
     });
 
   } catch (error: unknown) {
-    console.error("Backfill error:", error);
+    console.error("Sync error:", error);
     
     try {
         await supabase.from("sync_logs").insert({
-            platform_id: "youtube-backfill",
+            platform_id: "youtube-sync",
             status: "error",
-            error_message: error instanceof Error ? error.message : String(error),
-            created_at: new Date().toISOString(),
+            message: error instanceof Error ? error.message : String(error),
+            run_at: new Date().toISOString(),
         });
     } catch(e) {
         console.error("Failed to log error to sync_logs", e);
