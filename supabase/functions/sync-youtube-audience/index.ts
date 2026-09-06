@@ -52,11 +52,11 @@ serve(async (req) => {
 
     const accessToken = tokenData.access_token;
 
-    // Date range: last 30 days
+    // Date range: last 90 days
     const today = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(today.getDate() - 30);
-    const startDate = thirtyDaysAgo.toISOString().split("T")[0];
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(today.getDate() - 90);
+    const startDate = ninetyDaysAgo.toISOString().split("T")[0];
     const endDate = today.toISOString().split("T")[0];
 
     const results = { audience: 0, geography: 0, traffic: 0 };

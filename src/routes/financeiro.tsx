@@ -10,10 +10,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
-import { buildEarnings, earningsByDay } from "@/lib/mock-data";
+import { earningsByDay } from "@/lib/mock-data";
 import { MONETIZED_PLATFORMS, formatBRL, getPlatform } from "@/lib/platforms";
+import { getFinancialEntries } from "@/lib/youtube.functions";
 
 export const Route = createFileRoute("/financeiro")({
   head: () => ({
@@ -35,8 +38,25 @@ export const Route = createFileRoute("/financeiro")({
 });
 
 function FinancePage() {
-  const rows = useMemo(() => buildEarnings(14), []);
-  const byDay = useMemo(() => earningsByDay(rows), [rows]);
+  const fetchFinancials = useServerFn(getFinancialEntries);
+  
+  const query = useQuery({
+    queryKey: ["financial-entries", 14],
+    queryFn: () => fetchFinancials({ data: { days: 14 } }),
+  });
+
+  const rows = useMemo(() => {
+    const data = query.data ?? [];
+    return data.map((r) => {
+      const parsed = new Date(`${r.date}T00:00:00`);
+      return {
+        ...r,
+        label: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+      };
+    });
+  }, [query.data]);
+
+  const byDay = useMemo(() => earningsByDay(rows as any), [rows]);
   const total = rows.reduce((sum, r) => sum + r.amount, 0);
   const today = rows[0]?.date;
   const todayTotal = rows.filter((r) => r.date === today).reduce((sum, r) => sum + r.amount, 0);
@@ -71,7 +91,10 @@ function FinancePage() {
       </div>
 
       <section className="panel mt-10 p-6">
-        <h2 className="text-2xl font-semibold">Ganhos por dia e plataforma</h2>
+        <div className="flex items-center justify-between mb-8">
+          <h2 className="text-2xl font-semibold">Ganhos por dia e plataforma</h2>
+          {query.isLoading && <p className="text-sm text-muted-foreground">Carregando...</p>}
+        </div>
         <div className="mt-8 h-[360px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={byDay}>
