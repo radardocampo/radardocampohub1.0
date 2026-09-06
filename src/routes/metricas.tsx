@@ -41,6 +41,7 @@ import {
 } from "@/lib/youtube.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const RANGES = [
@@ -467,7 +468,7 @@ function MetricsPage() {
       const entry: Record<string, any> = { age_group: age.replace("age", "") };
       for (const r of rows) {
         if (r.age_group === age) {
-          entry[r.gender] = r.viewer_percentage;
+          entry[r.gender] = r.gender === 'female' ? -r.viewer_percentage : r.viewer_percentage;
         }
       }
       return entry;
@@ -994,14 +995,14 @@ function MetricsPage() {
               ) : (
                 <div className="mt-8 h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={audienceChartData}>
-                      <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
-                      <XAxis dataKey="age_group" stroke="var(--muted-foreground)" fontSize={13} />
-                      <YAxis stroke="var(--muted-foreground)" fontSize={13} width={56} tickFormatter={(v: number) => `${v}%`} />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [`${value}%`, ""]} />
+                    <BarChart data={audienceChartData} layout="vertical" stackOffset="sign">
+                      <CartesianGrid stroke="var(--border)" horizontal={false} strokeDasharray="4 4" />
+                      <XAxis type="number" stroke="var(--muted-foreground)" fontSize={13} tickFormatter={(v: number) => `${Math.abs(v)}%`} />
+                      <YAxis type="category" dataKey="age_group" stroke="var(--muted-foreground)" fontSize={13} width={56} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [`${Math.abs(value)}%`, ""]} />
                       <Legend />
-                      <Bar dataKey="male" name="Masculino" fill="#36A2EB" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="female" name="Feminino" fill="#FF6384" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="female" name="Feminino" fill="#FF6384" stackId="a" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="male" name="Masculino" fill="#36A2EB" stackId="a" radius={[0, 0, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1177,11 +1178,18 @@ function MetricsPage() {
             )}
 
             {videosQuery.isLoading ? (
-              <p className="text-base text-muted-foreground">Carregando vídeos...</p>
+              <div className="space-y-4 mt-8">
+                <Skeleton className="h-[200px] w-full" />
+                <Skeleton className="h-[400px] w-full" />
+              </div>
             ) : filteredVideos.length === 0 ? (
-              <p className="text-base text-muted-foreground">
-                Nenhum vídeo encontrado. Clique em "Sincronizar Audiência e Vídeos" para buscar os dados.
-              </p>
+              <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed rounded-xl border-border bg-surface-1/50 my-8">
+                 <Video className="size-12 text-muted-foreground/30 mb-4" />
+                 <h3 className="text-xl font-semibold mb-2">Nenhum vídeo no período</h3>
+                 <p className="text-muted-foreground max-w-sm">
+                   Ajuste a janela de tempo acima ou clique em "Sincronizar Audiência e Vídeos" para buscar os dados mais recentes.
+                 </p>
+              </div>
             ) : (
               <>
                 <div className="mb-8 grid gap-6 sm:grid-cols-2">
