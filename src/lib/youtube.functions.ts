@@ -275,7 +275,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     }
 
     const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<Record<string, any>> | null;
+      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
       error: { message: string } | null;
     };
     if (metricsError) throw new Error(metricsError.message);
@@ -353,7 +353,7 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
     }
     
     const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<Record<string, any>> | null;
+      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
       error: { message: string } | null;
     };
     if (metricsError) throw new Error(metricsError.message);
