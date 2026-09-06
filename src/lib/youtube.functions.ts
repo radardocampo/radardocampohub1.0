@@ -44,6 +44,7 @@ export type YoutubeVideoRow = {
   comments: number;
   watch_time_hours: number;
   avg_view_duration_seconds: number;
+  eng_rate?: number;
 };
 
 /** Lê as métricas diárias reais do YouTube já salvas no banco. */
@@ -329,6 +330,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
         comments: m.comments,
         watch_time_hours: m.watch_time_hours,
         avg_view_duration_seconds: m.avg_view_duration_seconds,
+        eng_rate: m.views > 0 ? ((m.likes + m.comments) / m.views) * 100 : 0,
       };
     });
   });
@@ -488,4 +490,25 @@ export const getLatestSyncLog = createServerFn({ method: "GET" })
 
     if (error) throw new Error(error.message);
     return row as SyncLogRow | null;
+  });
+
+export type GrowthGoal = {
+  platform_id: string;
+  metric: string;
+  target_value: number;
+  period: string;
+};
+
+export const getPlatformGoals = createServerFn({ method: "GET" })
+  .validator((data: { platform_id: string; period: string }) => data)
+  .handler(async ({ data }): Promise<GrowthGoal[]> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: goals, error } = await supabaseAdmin
+      .from("growth_goals")
+      .select("platform_id, metric, target_value, period")
+      .eq("platform_id", data.platform_id)
+      .eq("period", data.period);
+
+    if (error) throw new Error(error.message);
+    return goals as GrowthGoal[];
   });
