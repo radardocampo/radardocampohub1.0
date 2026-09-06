@@ -34,14 +34,23 @@ import {
   getYoutubeGeography,
   getYoutubeTrafficSources,
   getYoutubeTopVideos,
+  getYoutubeBestPostingTime,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const RANGES = [
-  { days: 7, label: "7 dias" },
-  { days: 30, label: "30 dias" },
-  { days: 90, label: "90 dias" },
+  { days: 7, label: "Últimos 7 dias" },
+  { days: 30, label: "Últimos 30 dias" },
+  { days: 90, label: "Últimos 90 dias" },
+  { days: null, label: "Todo período" },
 ] as const;
+
+const countryDisplay = new Intl.DisplayNames(["pt-BR"], { type: "region" });
+const getFlagEmoji = (countryCode: string) => {
+  if (!countryCode || countryCode.length !== 2) return "";
+  return countryCode.toUpperCase().replace(/./g, char => String.fromCodePoint(char.charCodeAt(0) + 127397));
+};
 
 const tooltipStyle = {
   background: "var(--popover)",
@@ -72,6 +81,11 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   PROMOTED: "Promovido",
   EXTERNAL_APP: "App Externo",
 };
+
+const formatTrafficSource = (type: string) =>
+  TRAFFIC_SOURCE_LABELS[type] ?? type;
+
+
 
 /** Country code to name in Portuguese */
 const COUNTRY_NAMES: Record<string, string> = {
@@ -116,7 +130,7 @@ function pctChange(current: number, previous: number): number | null {
 }
 
 function MetricsPage() {
-  const [days, setDays] = useState<number>(30);
+  const [days, setDays] = useState<number | null>(30);
   const [selected, setSelected] = useState<string>("youtube");
   const [videoFilter, setVideoFilter] = useState<"all" | "shorts" | "long">("all");
   const [videoSort, setVideoSort] = useState<{ key: keyof YoutubeVideoRow; desc: boolean }>({ key: "views", desc: true });
@@ -129,6 +143,7 @@ function MetricsPage() {
   const fetchGeography = useServerFn(getYoutubeGeography);
   const fetchTrafficSources = useServerFn(getYoutubeTrafficSources);
   const fetchTopVideos = useServerFn(getYoutubeTopVideos);
+  const fetchBestTime = useServerFn(getYoutubeBestPostingTime);
 
   const historyExistsQuery = useQuery({
     queryKey: ["youtube-history-exists"],
@@ -146,26 +161,32 @@ function MetricsPage() {
   });
 
   const audienceQuery = useQuery({
-    queryKey: ["youtube-audience"],
-    queryFn: () => fetchAudience(),
+    queryKey: ["youtube-audience", days],
+    queryFn: () => fetchAudience({ data: { days } }),
     enabled: selected === "youtube",
   });
 
   const geographyQuery = useQuery({
-    queryKey: ["youtube-geography"],
-    queryFn: () => fetchGeography(),
+    queryKey: ["youtube-geography", days],
+    queryFn: () => fetchGeography({ data: { days } }),
     enabled: selected === "youtube",
   });
 
   const trafficQuery = useQuery({
-    queryKey: ["youtube-traffic"],
-    queryFn: () => fetchTrafficSources(),
+    queryKey: ["youtube-traffic", days],
+    queryFn: () => fetchTrafficSources({ data: { days } }),
     enabled: selected === "youtube",
   });
 
   const videosQuery = useQuery({
-    queryKey: ["youtube-videos"],
-    queryFn: () => fetchTopVideos(),
+    queryKey: ["youtube-videos", days],
+    queryFn: () => fetchTopVideos({ data: { days } }),
+    enabled: selected === "youtube",
+  });
+
+  const bestTimeQuery = useQuery({
+    queryKey: ["youtube-best-time", days],
+    queryFn: () => fetchBestTime({ data: { days } }),
     enabled: selected === "youtube",
   });
 
@@ -362,7 +383,7 @@ function MetricsPage() {
   }, [youtubePrevQuery.data]);
 
   const snapshots = useMemo(() => {
-    const mocks = buildSnapshots(days);
+    const mocks = buildSnapshots(days ?? 365);
     return mocks.map((snap) =>
       snap.id === "youtube"
         ? (youtubeSnapshot ?? {
@@ -425,8 +446,8 @@ function MetricsPage() {
   const filteredVideos = useMemo(() => {
     const all = videosQuery.data ?? [];
     let filtered = all;
-    if (videoFilter === "shorts") filtered = all.filter((v) => v.duration_seconds <= 60);
-    else if (videoFilter === "long") filtered = all.filter((v) => v.duration_seconds > 60);
+    if (videoFilter === "shorts") filtered = all.filter((v) => v.duration_seconds <= 180);
+    else if (videoFilter === "long") filtered = all.filter((v) => v.duration_seconds > 180);
 
     return [...filtered].sort((a, b) => {
       const aVal = a[videoSort.key];
@@ -585,28 +606,49 @@ function MetricsPage() {
       actions={
         <div className="flex flex-wrap items-center gap-3">
           {isYoutube && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending}
-                className="gap-2"
-              >
-                <RefreshCw className={`size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                Sincronizar agora
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => syncAudienceVideosMutation.mutate()}
-                disabled={syncAudienceVideosMutation.isPending}
-                className="gap-2"
-              >
-                <Video className={`size-4 ${syncAudienceVideosMutation.isPending ? "animate-spin" : ""}`} />
-                Sincronizar Audiência e Vídeos
-              </Button>
-            </>
+            <div className="flex items-center gap-3">
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      onClick={() => syncAudienceVideosMutation.mutate()}
+                      disabled={syncAudienceVideosMutation.isPending}
+                      className="h-9 px-3 text-sm font-medium"
+                    >
+                      <RefreshCw
+                        className={`mr-2 size-4 ${syncAudienceVideosMutation.isPending ? "animate-spin" : ""}`}
+                      />
+                      Sincronizar Audiência e Vídeos
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    Atualiza os dados demográficos e vídeos (últimos 90 dias) do YouTube.
+                  </TooltipContent>
+                </UITooltip>
+
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => syncMutation.mutate()}
+                      disabled={syncMutation.isPending}
+                      className="h-9 px-3 text-sm font-medium"
+                    >
+                      <RefreshCw className={`mr-2 size-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                      Sincronizar Visão Geral
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    Atualiza as métricas diárias gerais (views, inscritos, engajamento) do canal.
+                    {current?.series?.[current.series.length - 1]?.synced_at && (
+                      <span className="block mt-1 text-muted-foreground">
+                        Última sync: {new Date(current.series[current.series.length - 1].synced_at).toLocaleString("pt-BR")}
+                      </span>
+                    )}
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+            </div>
           )}
           <div className="flex gap-1 rounded-lg bg-secondary p-1">
             {RANGES.map((range) => (
@@ -925,15 +967,19 @@ function MetricsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(geographyQuery.data ?? []).map((row) => (
-                      <tr key={row.country_code} className="border-t border-border/50 hover:bg-surface-2 transition-colors">
-                        <td className="py-3 font-medium">
-                          {COUNTRY_NAMES[row.country_code] || row.country_code}
-                        </td>
-                        <td className="py-3">{formatFull(row.views)}</td>
-                        <td className="py-3">{formatNumber(row.watch_time_minutes)}</td>
-                      </tr>
-                    ))}
+                    {(geographyQuery.data ?? []).map((row) => {
+                      const flag = getFlagEmoji(row.country_code);
+                      const name = countryDisplay.of(row.country_code) || row.country_code;
+                      return (
+                        <tr key={row.country_code} className="border-t border-border/50 hover:bg-surface-2 transition-colors">
+                          <td className="py-3 font-medium flex items-center gap-2">
+                            <span>{flag}</span> {name}
+                          </td>
+                          <td className="py-3">{formatFull(row.views)}</td>
+                          <td className="py-3">{formatNumber(row.watch_time_minutes)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -952,48 +998,23 @@ function MetricsPage() {
                   Dados insuficientes para este período.
                 </p>
               ) : (
-                <div className="mt-8 grid gap-8 lg:grid-cols-2">
-                  {/* Horizontal bar chart */}
+                <div className="mt-8">
                   <div className="h-[400px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={(trafficQuery.data ?? []).map((r) => ({
-                          name: TRAFFIC_SOURCE_LABELS[r.traffic_source_type] || r.traffic_source_type,
+                          name: formatTrafficSource(r.traffic_source_type),
                           views: r.views,
                         }))}
                         layout="vertical"
-                        margin={{ left: 120 }}
+                        margin={{ left: 140 }}
                       >
                         <CartesianGrid stroke="var(--border)" horizontal={false} strokeDasharray="4 4" />
                         <XAxis type="number" stroke="var(--muted-foreground)" fontSize={13} tickFormatter={(v: number) => formatNumber(v)} />
-                        <YAxis type="category" dataKey="name" stroke="var(--muted-foreground)" fontSize={12} width={110} />
+                        <YAxis type="category" dataKey="name" stroke="var(--muted-foreground)" fontSize={12} width={130} />
                         <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [formatFull(value), "Views"]} />
                         <Bar dataKey="views" fill={meta.color} radius={[0, 4, 4, 0]} />
                       </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  {/* Pie chart */}
-                  <div className="h-[400px] flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={(trafficQuery.data ?? []).map((r) => ({
-                            name: TRAFFIC_SOURCE_LABELS[r.traffic_source_type] || r.traffic_source_type,
-                            value: r.views,
-                          }))}
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={130}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                          labelLine={false}
-                        >
-                          {(trafficQuery.data ?? []).map((_, idx) => (
-                            <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [formatFull(value), "Views"]} />
-                      </PieChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
@@ -1015,7 +1036,7 @@ function MetricsPage() {
                     onClick={() => setVideoFilter(f)}
                     className="px-4 text-sm font-medium"
                   >
-                    {f === "all" ? "Todos" : f === "shorts" ? "Shorts (≤ 60s)" : "Vídeos Longos"}
+                    {f === "all" ? "Todos" : f === "shorts" ? "Shorts (≤ 3min)" : "Vídeos Longos"}
                   </Button>
                 ))}
               </div>
@@ -1023,6 +1044,74 @@ function MetricsPage() {
                 {filteredVideos.length} vídeo{filteredVideos.length !== 1 ? "s" : ""}
               </p>
             </div>
+
+            {/* NEW: Videos Summary Cards */}
+            {filteredVideos.length > 0 && (
+              <div className="grid gap-6 md:grid-cols-3 mb-8">
+                <MetricTile
+                  label="Total de Views (Filtro)"
+                  value={formatNumber(filteredVideos.reduce((acc, v) => acc + v.views, 0))}
+                  hint={`${filteredVideos.length} vídeos listados`}
+                />
+                <MetricTile
+                  label="Média de Views / Vídeo"
+                  value={formatNumber(Math.round(filteredVideos.reduce((acc, v) => acc + v.views, 0) / filteredVideos.length))}
+                  hint="Desempenho médio"
+                />
+                <MetricTile
+                  label="Tempo de Exibição"
+                  value={`${formatNumber(filteredVideos.reduce((acc, v) => acc + v.watch_time_hours, 0))}h`}
+                  hint="Horas assistidas"
+                />
+              </div>
+            )}
+
+            {/* NEW: Best Posting Time */}
+            {bestTimeQuery.data && (
+              <section className="panel mb-8 p-6">
+                <h2 className="text-xl font-semibold mb-1">Melhor Horário para Postar</h2>
+                {bestTimeQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Analisando horários...</p>
+                ) : !bestTimeQuery.data.hasEnoughData ? (
+                  <p className="text-sm text-muted-foreground">
+                    Dados insuficientes para sugerir horários consistentes (requer pelo menos 3 vídeos no mesmo horário).
+                  </p>
+                ) : (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Baseado na média de visualizações por horário de publicação dos seus vídeos de melhor desempenho.
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+                      {bestTimeQuery.data.blocks.slice(0, 3).map((block: any, idx: number) => {
+                        const isTop = idx === 0;
+                        const diff = bestTimeQuery.data.overallAvgViews > 0 
+                          ? ((block.avg_views - bestTimeQuery.data.overallAvgViews) / bestTimeQuery.data.overallAvgViews) * 100
+                          : 0;
+                        return (
+                          <div key={block.key} className={`rounded-xl p-4 border ${isTop ? 'border-primary/50 bg-primary/5' : 'border-border/50 bg-surface-2'}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                              {isTop && <span className="text-lg">🔥</span>}
+                              <h3 className="font-semibold">{block.key}</h3>
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-1">
+                              Média de <strong>{formatNumber(Math.round(block.avg_views))} views</strong>
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              (Baseado em {block.count} vídeo{block.count !== 1 ? 's' : ''})
+                            </p>
+                            {diff > 0 && (
+                              <span className="text-xs text-success font-medium inline-block mt-2">
+                                +{diff.toFixed(0)}% vs média
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
 
             {videosQuery.isLoading ? (
               <p className="text-base text-muted-foreground">Carregando vídeos...</p>
@@ -1061,19 +1150,23 @@ function MetricsPage() {
                       >
                         <td className="py-3 pl-2">
                           <div className="flex items-center gap-3">
-                            {video.thumbnail_url && (
+                            {video.thumbnail_url ? (
                               <img
                                 src={video.thumbnail_url}
                                 alt=""
-                                className="h-12 w-20 rounded-md object-cover flex-shrink-0"
+                                className="h-16 w-28 rounded-md object-cover flex-shrink-0"
                               />
+                            ) : (
+                              <div className="h-16 w-28 rounded-md bg-secondary flex-shrink-0 flex items-center justify-center">
+                                <Video className="size-6 text-muted-foreground opacity-50" />
+                              </div>
                             )}
                             <div className="min-w-0">
                               <p className="font-medium truncate max-w-[280px]" title={video.title}>
                                 {video.title}
                               </p>
-                              {video.duration_seconds <= 60 && (
-                                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                              {video.duration_seconds <= 180 && (
+                                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium mt-1 inline-block">
                                   Short
                                 </span>
                               )}
@@ -1101,22 +1194,22 @@ function MetricsPage() {
             <MetricTile
               label="Seguidores"
               value={formatFull(current.followers)}
-              hint={`+${current.followersDelta}% no período`}
+              hint={days === null ? "" : `+${current.followersDelta}% no período`}
             />
             <MetricTile
               label="Views"
               value={formatNumber(current.views)}
-              hint="crescimento no período selecionado"
+              hint={days === null ? "" : "crescimento no período selecionado"}
             />
             <MetricTile
               label="Curtidas"
               value={formatNumber(current.likes)}
-              hint="no período selecionado"
+              hint={days === null ? "" : "no período selecionado"}
             />
             <MetricTile
               label="Engajamento"
               value={`${current.engagement_rate}%`}
-              hint="média do período"
+              hint={days === null ? "" : "média do período"}
             />
           </div>
 

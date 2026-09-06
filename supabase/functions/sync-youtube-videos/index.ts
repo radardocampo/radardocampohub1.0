@@ -183,11 +183,10 @@ serve(async (req) => {
     analyticsUrl.searchParams.append("startDate", startDate);
     analyticsUrl.searchParams.append("endDate", endDate);
     analyticsUrl.searchParams.append("metrics", "views,likes,comments,estimatedMinutesWatched,averageViewDuration");
-    analyticsUrl.searchParams.append("dimensions", "video");
-    analyticsUrl.searchParams.append("sort", "-views");
-    analyticsUrl.searchParams.append("maxResults", "50");
-    // NOTE: filters=video==id1,id2,... is limited, so we rely on maxResults+sort instead
-    // and match results against our known videoIds.
+    analyticsUrl.searchParams.append("dimensions", "video,day");
+    if (videoIds.length > 0) {
+      analyticsUrl.searchParams.append("filters", `video==${videoIds.join(",")}`);
+    }
 
     const analyticsRes = await fetch(analyticsUrl.toString(), {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
@@ -198,20 +197,20 @@ serve(async (req) => {
     if (analyticsRes.ok && analyticsData.rows) {
       const metricsRows = [];
       for (const row of analyticsData.rows) {
-        // row: [videoId, views, likes, comments, estimatedMinutesWatched, averageViewDuration]
+        // row: [videoId, day, views, likes, comments, estimatedMinutesWatched, averageViewDuration]
         const videoId = row[0];
+        const day = row[1];
         // Only upsert metrics for videos we know about
         if (!videoMeta[videoId] && !videoIds.includes(videoId)) continue;
 
         metricsRows.push({
           video_id: videoId,
-          period_start: startDate,
-          period_end: endDate,
-          views: row[1] || 0,
-          likes: row[2] || 0,
-          comments: row[3] || 0,
-          watch_time_hours: Number(((row[4] || 0) / 60).toFixed(2)),
-          avg_view_duration_seconds: row[5] || 0,
+          date: day,
+          views: row[2] || 0,
+          likes: row[3] || 0,
+          comments: row[4] || 0,
+          watch_time_hours: Number(((row[5] || 0) / 60).toFixed(2)),
+          avg_view_duration_seconds: row[6] || 0,
           synced_at: new Date().toISOString(),
         });
       }
@@ -247,8 +246,8 @@ serve(async (req) => {
         }
 
         const { error } = await supabase
-          .from("youtube_video_metrics_period")
-          .upsert(metricsRows, { onConflict: "video_id,period_start,period_end" });
+          .from("youtube_video_metrics_daily")
+          .upsert(metricsRows, { onConflict: "video_id,date" });
         if (error) console.error("video_metrics upsert error:", error.message);
         else metricsUpserted = metricsRows.length;
       }
