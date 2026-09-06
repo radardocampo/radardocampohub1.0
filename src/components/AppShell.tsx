@@ -29,6 +29,7 @@ export function AppShell({
   subtitle?: string;
   actions?: ReactNode;
   children: ReactNode;
+  hideDemoWarning?: boolean;
 }) {
   return (
     <div className="min-h-screen bg-background">
@@ -58,9 +59,11 @@ export function AppShell({
             </Link>
           ))}
         </nav>
-        <p className="px-5 py-5 text-xs text-muted-foreground">
-          Dados demonstrativos — sincronização das APIs em breve.
-        </p>
+        {!hideDemoWarning && (
+          <p className="px-5 py-5 text-xs text-muted-foreground">
+            Dados demonstrativos — sincronização das APIs em breve.
+          </p>
+        )}
       </aside>
 
       <div className="md:ml-[var(--sidebar-width)]">
