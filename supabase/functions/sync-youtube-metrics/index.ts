@@ -41,7 +41,7 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "error",
         message: `Refresh token failed: ${JSON.stringify(tokenData)}`,
         run_at: new Date().toISOString(),
@@ -121,7 +121,7 @@ serve(async (req) => {
           throw new Error(`Analytics API error: ${JSON.stringify(analyticsResult)}`);
         }
         await supabase.from("sync_logs").insert({
-          platform_id: "youtube-sync",
+          platform_id: "youtube",
           status: "warning",
           message: "estimatedRevenue not available (channel not monetized or missing scope). Synced other metrics normally.",
           run_at: new Date().toISOString(),
@@ -223,7 +223,7 @@ serve(async (req) => {
     }
     
     await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "success",
         message: `Processed ${metricsToUpsert.length} days`,
         run_at: new Date().toISOString(),
@@ -238,7 +238,7 @@ serve(async (req) => {
     
     try {
         await supabase.from("sync_logs").insert({
-            platform_id: "youtube-sync",
+            platform_id: "youtube",
             status: "error",
             message: error instanceof Error ? error.message : String(error),
             run_at: new Date().toISOString(),

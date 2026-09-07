@@ -149,8 +149,8 @@ function MetricsPage() {
   });
 
   const syncLogQuery = useQuery({
-    queryKey: ["sync-log", selected === "youtube" ? "youtube-sync" : selected],
-    queryFn: () => fetchLatestSync({ data: { platform_id: selected === "youtube" ? "youtube-sync" : selected } }),
+    queryKey: ["sync-log", selected],
+    queryFn: () => fetchLatestSync({ data: { platform_id: selected } }),
   });
 
   const historyExistsQuery = useQuery({
