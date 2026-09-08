@@ -152,7 +152,6 @@ function MetricsPage() {
 
   const syncLogQuery = useQuery({
     queryKey: ["sync-log", selected],
-    queryFn: () => fetchLatestSync({ data: { platform_id: selected } }),
     queryKey: ["sync-log", selected === "youtube" ? "youtube-sync" : selected],
     queryFn: () => fetchLatestSync({ data: { platform_id: selected === "youtube" ? "youtube-sync" : selected } }),
   });
@@ -1252,14 +1251,12 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Shorts (≤ 3m)"
                     value={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
                       const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "N/A";
                       const avgViews = shorts.reduce((acc, v) => acc + v.views, 0) / shorts.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
                       const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "";
                       const avgAvd = shorts.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / shorts.length;
@@ -1269,14 +1266,12 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Vídeos Longos (> 3m)"
                     value={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
                       const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "N/A";
                       const avgViews = longs.reduce((acc, v) => acc + v.views, 0) / longs.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
                       const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "";
                       const avgAvd = longs.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / longs.length;
