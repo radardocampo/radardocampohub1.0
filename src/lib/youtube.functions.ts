@@ -44,6 +44,7 @@ export type YoutubeVideoRow = {
   comments: number;
   watch_time_hours: number;
   avg_view_duration_seconds: number;
+  eng_rate?: number;
 };
 
 /** Lê as métricas diárias reais do YouTube já salvas no banco. */
@@ -281,14 +282,15 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     if (metricsError) throw new Error(metricsError.message);
     if (!metrics || metrics.length === 0) return [];
 
-    const map = new Map<string, { views: number; likes: number; comments: number; watch_time: number; avd_sum: number; count: number }>();
+    const map = new Map<string, { views: number; likes: number; comments: number; watch_time: number; avd_weighted_sum: number; count: number }>();
     for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, likes: 0, comments: 0, watch_time: 0, avd_sum: 0, count: 0 };
-      curr.views += Number(m.views);
+      const curr = map.get(m.video_id) ?? { views: 0, likes: 0, comments: 0, watch_time: 0, avd_weighted_sum: 0, count: 0 };
+      const dailyViews = Number(m.views);
+      curr.views += dailyViews;
       curr.likes += Number(m.likes);
       curr.comments += Number(m.comments);
       curr.watch_time += Number(m.watch_time_hours);
-      curr.avd_sum += Number(m.avg_view_duration_seconds);
+      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
       curr.count += 1;
       map.set(m.video_id, curr);
     }
@@ -300,7 +302,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
         likes: val.likes,
         comments: val.comments,
         watch_time_hours: val.watch_time,
-        avg_view_duration_seconds: val.count > 0 ? val.avd_sum / val.count : 0,
+        avg_view_duration_seconds: val.views > 0 ? val.avd_weighted_sum / val.views : 0,
       }))
       .sort((a, b) => b.views - a.views)
       .slice(0, 50);
@@ -328,6 +330,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
         comments: m.comments,
         watch_time_hours: m.watch_time_hours,
         avg_view_duration_seconds: m.avg_view_duration_seconds,
+        eng_rate: m.views > 0 ? ((m.likes + m.comments) / m.views) * 100 : 0,
       };
     });
   });
@@ -360,11 +363,12 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
     
     if (!metrics || metrics.length === 0) return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false };
     
-    const map = new Map<string, { views: number; avd_sum: number; count: number }>();
+    const map = new Map<string, { views: number; avd_weighted_sum: number; count: number }>();
     for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, avd_sum: 0, count: 0 };
-      curr.views += Number(m.views);
-      curr.avd_sum += Number(m.avg_view_duration_seconds);
+      const curr = map.get(m.video_id) ?? { views: 0, avd_weighted_sum: 0, count: 0 };
+      const dailyViews = Number(m.views);
+      curr.views += dailyViews;
+      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
       curr.count += 1;
       map.set(m.video_id, curr);
     }
@@ -400,7 +404,7 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
       
       if (!blocks[key]) blocks[key] = { views: 0, avd: 0, count: 0 };
       blocks[key].views += stats.views;
-      blocks[key].avd += stats.count > 0 ? stats.avd_sum / stats.count : 0;
+      blocks[key].avd += stats.views > 0 ? stats.avd_weighted_sum / stats.views : 0;
       blocks[key].count += 1;
       
       totalViews += stats.views;
@@ -463,4 +467,53 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
       currency: r.currency,
       source_type: r.source_type ?? "",
     }));
+  });
+
+export type SyncLogRow = {
+  platform_id: string;
+  status: string;
+  message: string;
+  run_at: string;
+};
+
+export const getLatestSyncLog = createServerFn({ method: "GET" })
+  .validator((data: { platform_id: string }) => data)
+  .handler(async ({ data }): Promise<SyncLogRow | null> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: row, error } = await supabaseAdmin
+      .from("sync_logs")
+      .select("platform_id, status, message, run_at")
+      .eq("platform_id", data.platform_id)
+      .order("run_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return row as SyncLogRow | null;
+  });
+
+export type GrowthGoal = {
+  platform_id: string;
+  metric: string;
+  target_value: number;
+  period: string;
+};
+
+export const getPlatformGoals = createServerFn({ method: "GET" })
+  .validator((data: { platform_id: string; period: string }) => data)
+  .handler(async ({ data }): Promise<GrowthGoal[]> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: goals, error } = await (supabaseAdmin as any)
+      .from("growth_goals")
+      .select("platform_id, metric, target_value, period")
+      .eq("platform_id", data.platform_id)
+      .eq("period", data.period);
+
+    // A tabela de metas ainda pode não existir no banco: nesse caso seguimos sem metas.
+    if (error) {
+      const msg = error.message ?? "";
+      if (error.code === "PGRST205" || msg.includes("growth_goals")) return [];
+      throw new Error(msg);
+    }
+    return (goals ?? []) as GrowthGoal[];
   });
