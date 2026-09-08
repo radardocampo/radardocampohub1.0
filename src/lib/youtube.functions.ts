@@ -503,12 +503,15 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
   .validator((data: { platform_id: string; period: string }) => data)
   .handler(async ({ data }): Promise<GrowthGoal[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: goals, error } = await supabaseAdmin
     const { data: goals, error } = await (supabaseAdmin as any)
       .from("growth_goals")
       .select("platform_id, metric, target_value, period")
       .eq("platform_id", data.platform_id)
       .eq("period", data.period);
 
+    if (error) throw new Error(error.message);
+    return goals as GrowthGoal[];
     // A tabela de metas ainda pode não existir no banco: nesse caso seguimos sem metas.
     if (error) {
       const msg = error.message ?? "";

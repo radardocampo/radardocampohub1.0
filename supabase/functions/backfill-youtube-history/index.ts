@@ -251,10 +251,10 @@ serve(async (req) => {
     }
     
     await supabase.from("sync_logs").insert({
-        platform_id: "youtube-backfill",
+        platform_id: "youtube",
         status: "success",
-        records_processed: metricsToUpsert.length,
-        created_at: new Date().toISOString(),
+        message: `Processed ${metricsToUpsert.length} records in backfill`,
+        run_at: new Date().toISOString(),
     });
 
     return new Response(JSON.stringify({ success: true, processed: metricsToUpsert.length }), {
@@ -266,10 +266,10 @@ serve(async (req) => {
     
     try {
         await supabase.from("sync_logs").insert({
-            platform_id: "youtube-backfill",
+            platform_id: "youtube",
             status: "error",
-            error_message: error instanceof Error ? error.message : String(error),
-            created_at: new Date().toISOString(),
+            message: `[backfill] ${error instanceof Error ? error.message : String(error)}`,
+            run_at: new Date().toISOString(),
         });
     } catch(e) {
         console.error("Failed to log error to sync_logs", e);

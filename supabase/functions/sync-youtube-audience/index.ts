@@ -39,7 +39,7 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "error",
         message: `[audience] Refresh token failed: ${JSON.stringify(tokenData)}`,
         run_at: new Date().toISOString(),
@@ -181,7 +181,7 @@ serve(async (req) => {
 
     // 5. Log success
     await supabase.from("sync_logs").insert({
-      platform_id: "youtube-sync",
+      platform_id: "youtube",
       status: "success",
       message: `[audience] demographics=${results.audience}, geography=${results.geography}, traffic=${results.traffic}`,
       run_at: new Date().toISOString(),
@@ -196,7 +196,7 @@ serve(async (req) => {
 
     try {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "error",
         message: `[audience] ${error instanceof Error ? error.message : String(error)}`,
         run_at: new Date().toISOString(),

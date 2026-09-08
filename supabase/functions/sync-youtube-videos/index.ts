@@ -54,7 +54,7 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "error",
         message: `[videos] Refresh token failed: ${JSON.stringify(tokenData)}`,
         run_at: new Date().toISOString(),
@@ -118,7 +118,7 @@ serve(async (req) => {
 
     if (videoIds.length === 0) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "success",
         message: "[videos] No recent videos found in the last 90 days",
         run_at: new Date().toISOString(),
@@ -172,92 +172,62 @@ serve(async (req) => {
       if (error) console.error("youtube_videos upsert error:", error.message);
     }
 
-    // 6. Fetch per-video analytics using dimensions=video (batch via Analytics API)
-    //    This is more efficient than one call per video.
+    // 6. Fetch per-video analytics using dimensions=day (batching not supported for multiple videos with day dimension)
     const today = new Date();
     const startDate = ninetyDaysAgo.toISOString().split("T")[0];
     const endDate = today.toISOString().split("T")[0];
 
-    const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
-    analyticsUrl.searchParams.append("ids", "channel==MINE");
-    analyticsUrl.searchParams.append("startDate", startDate);
-    analyticsUrl.searchParams.append("endDate", endDate);
-    analyticsUrl.searchParams.append("metrics", "views,likes,comments,estimatedMinutesWatched,averageViewDuration");
-    analyticsUrl.searchParams.append("dimensions", "video,day");
-    if (videoIds.length > 0) {
-      analyticsUrl.searchParams.append("filters", `video==${videoIds.join(",")}`);
-    }
-
-    const analyticsRes = await fetch(analyticsUrl.toString(), {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-    });
-    const analyticsData = await analyticsRes.json();
-
     let metricsUpserted = 0;
-    if (analyticsRes.ok && analyticsData.rows) {
-      const metricsRows = [];
-      for (const row of analyticsData.rows) {
-        // row: [videoId, day, views, likes, comments, estimatedMinutesWatched, averageViewDuration]
-        const videoId = row[0];
-        const day = row[1];
-        // Only upsert metrics for videos we know about
-        if (!videoMeta[videoId] && !videoIds.includes(videoId)) continue;
+    
+    // Process in chunks to avoid overwhelming the Analytics API
+    for (let i = 0; i < videoIds.length; i += 5) {
+      const chunk = videoIds.slice(i, i + 5);
+      const promises = chunk.map(async (videoId) => {
+        const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+        analyticsUrl.searchParams.append("ids", "channel==MINE");
+        analyticsUrl.searchParams.append("startDate", startDate);
+        analyticsUrl.searchParams.append("endDate", endDate);
+        analyticsUrl.searchParams.append("metrics", "views,likes,comments,estimatedMinutesWatched,averageViewDuration");
+        analyticsUrl.searchParams.append("dimensions", "day");
+        analyticsUrl.searchParams.append("filters", `video==${videoId}`);
 
-        metricsRows.push({
-          video_id: videoId,
-          date: day,
-          views: row[2] || 0,
-          likes: row[3] || 0,
-          comments: row[4] || 0,
-          watch_time_hours: Number(((row[5] || 0) / 60).toFixed(2)),
-          avg_view_duration_seconds: row[6] || 0,
-          synced_at: new Date().toISOString(),
+        const analyticsRes = await fetch(analyticsUrl.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
         });
-      }
-
-      if (metricsRows.length > 0) {
-        // Ensure all video_ids exist in youtube_videos before inserting metrics
-        // (some analytics results may be for videos not in our recent list)
-        const missingVideoIds = metricsRows
-          .filter((r) => !videoMeta[r.video_id])
-          .map((r) => r.video_id);
-
-        if (missingVideoIds.length > 0) {
-          // Fetch metadata for these videos
-          const mUrl = new URL("https://youtube.googleapis.com/youtube/v3/videos");
-          mUrl.searchParams.append("part", "snippet,contentDetails");
-          mUrl.searchParams.append("id", missingVideoIds.join(","));
-          mUrl.searchParams.append("key", apiKey);
-          const mRes = await fetch(mUrl.toString());
-          const mData = await mRes.json();
-          if (mRes.ok && mData.items) {
-            const extraRows = mData.items.map((item: any) => ({
-              video_id: item.id,
-              title: item.snippet.title,
-              thumbnail_url: item.snippet.thumbnails?.medium?.url || "",
-              published_at: item.snippet.publishedAt,
-              duration_seconds: parseDuration(item.contentDetails.duration || "PT0S"),
-              updated_at: new Date().toISOString(),
-            }));
-            if (extraRows.length > 0) {
-              await supabase.from("youtube_videos").upsert(extraRows, { onConflict: "video_id" });
-            }
+        const analyticsData = await analyticsRes.json();
+        
+        if (analyticsRes.ok && analyticsData.rows) {
+          const metricsRows = analyticsData.rows.map((row: any) => ({
+            video_id: videoId,
+            date: row[0],
+            views: row[1] || 0,
+            likes: row[2] || 0,
+            comments: row[3] || 0,
+            watch_time_hours: Number(((row[4] || 0) / 60).toFixed(2)),
+            avg_view_duration_seconds: row[5] || 0,
+            synced_at: new Date().toISOString(),
+          }));
+          
+          if (metricsRows.length > 0) {
+            const { error } = await supabase
+              .from("youtube_video_metrics_daily")
+              .upsert(metricsRows, { onConflict: "video_id,date" });
+            if (error) console.error(`video_metrics upsert error for ${videoId}:`, error.message);
+            else return metricsRows.length;
           }
+        } else if (!analyticsRes.ok) {
+          console.warn(`Video analytics error for ${videoId}:`, JSON.stringify(analyticsData));
         }
-
-        const { error } = await supabase
-          .from("youtube_video_metrics_daily")
-          .upsert(metricsRows, { onConflict: "video_id,date" });
-        if (error) console.error("video_metrics upsert error:", error.message);
-        else metricsUpserted = metricsRows.length;
-      }
-    } else if (!analyticsRes.ok) {
-      console.warn("Video analytics error:", JSON.stringify(analyticsData));
+        return 0;
+      });
+      
+      const results = await Promise.all(promises);
+      metricsUpserted += results.reduce((acc, curr) => acc + curr, 0);
     }
 
     // 7. Log success
     await supabase.from("sync_logs").insert({
-      platform_id: "youtube-sync",
+      platform_id: "youtube",
       status: "success",
       message: `[videos] metadata=${videoRows.length}, analytics=${metricsUpserted}`,
       run_at: new Date().toISOString(),
@@ -273,7 +243,7 @@ serve(async (req) => {
 
     try {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-sync",
+        platform_id: "youtube",
         status: "error",
         message: `[videos] ${error instanceof Error ? error.message : String(error)}`,
         run_at: new Date().toISOString(),
