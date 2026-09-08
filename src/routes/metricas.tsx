@@ -90,6 +90,20 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
 
 
 
+const formatTrafficSource = (type: string) =>
+  TRAFFIC_SOURCE_LABELS[type] ?? type;
+
+
+
+/** Country code to name in Portuguese */
+const COUNTRY_NAMES: Record<string, string> = {
+  BR: "Brasil", US: "Estados Unidos", PT: "Portugal", MX: "México",
+  AR: "Argentina", CO: "Colômbia", CL: "Chile", PE: "Peru",
+  DE: "Alemanha", FR: "França", ES: "Espanha", IT: "Itália",
+  GB: "Reino Unido", JP: "Japão", IN: "Índia", CA: "Canadá",
+  AU: "Austrália", AO: "Angola", MZ: "Moçambique", PY: "Paraguai",
+  UY: "Uruguai", BO: "Bolívia", EC: "Equador", VE: "Venezuela",
+};
 
 const PIE_COLORS = [
   "#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF",
@@ -229,6 +243,48 @@ function MetricsPage() {
       toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      const hint = message.toLowerCase().includes("canal não encontrado")
+        ? " Verifique o secret YOUTUBE_CHANNEL_ID no Supabase (deve ser o ID do canal, começando com UC...)."
+        : "";
+      toast.error(`Falha ao sincronizar: ${message}${hint}`, {
+        id: "sync-youtube",
+        duration: 8000,
+      });
+    },
+  });
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
+        method: "POST",
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data;
+    },
+    onMutate: () => {
+      toast.info("Iniciando backfill histórico. Isso pode levar alguns segundos...", { id: "backfill-youtube" });
+    },
+    onSuccess: async () => {
+      toast.success("Histórico preenchido com sucesso!", { id: "backfill-youtube" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
       await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
@@ -812,6 +868,12 @@ function MetricsPage() {
               </section>
             )}
 
+                label="Engajamento"
+                value={`${current.engagement_rate}%`}
+                hint="últimos 10 vídeos publicados"
+              />
+            </div>
+
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">
                 Evolução — <span className={meta.textClass}>{meta.name}</span>
@@ -821,6 +883,11 @@ function MetricsPage() {
               </p>
               {youtubeQuery.isLoading ? (
                 <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
+              ) : current.series.length === 0 ? (
+                <p className="mt-8 text-base text-muted-foreground">
+                  Sem dados no período selecionado. Clique em “Sincronizar agora” para baixar as
+                  métricas.
+                </p>
               ) : (
                 renderEvolutionCharts(current.series)
               )}
