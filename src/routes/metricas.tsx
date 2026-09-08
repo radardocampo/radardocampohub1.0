@@ -151,8 +151,6 @@ function MetricsPage() {
   });
 
   const syncLogQuery = useQuery({
-    queryKey: ["sync-log", selected],
-    queryFn: () => fetchLatestSync({ data: { platform_id: selected } }),
     queryKey: ["sync-log", selected === "youtube" ? "youtube-sync" : selected],
     queryFn: () => fetchLatestSync({ data: { platform_id: selected === "youtube" ? "youtube-sync" : selected } }),
   });
@@ -830,61 +828,10 @@ function MetricsPage() {
                     : "soma do período selecionado"
                 }
               />
-            </div>
-
-            {goalsQuery.data && goalsQuery.data.length > 0 && (
-              <section className="panel mt-6 p-6">
-                <h3 className="text-lg font-semibold mb-4">Metas do Mês</h3>
-                <div className="grid gap-6 sm:grid-cols-2">
-                  {goalsQuery.data.map(goal => {
-                    let currentValue = 0;
-                    if (goal.metric === 'views') currentValue = current.views;
-                    else if (goal.metric === 'followers') currentValue = current.followers;
-                    else if (goal.metric === 'likes') currentValue = current.likes;
-
-                    const percent = Math.min(100, Math.max(0, (currentValue / goal.target_value) * 100));
-
-                    return (
-                      <div key={goal.metric}>
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="font-medium capitalize">{goal.metric}</span>
-                          <span className="text-muted-foreground">{formatNumber(currentValue)} / {formatNumber(goal.target_value)}</span>
-                        </div>
-                        <Progress value={percent} className="h-2" />
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
+              <MetricTile
                 label="Engajamento"
                 value={`${current.engagement_rate}%`}
                 hint="médio do período selecionado"
-              />
-              <MetricTile
-                label="Comentários"
-                value={formatNumber(current.comments || 0)}
-                hint={
-                  prevTotals
-                    ? (() => {
-                        const delta = pctChange(current.comments || 0, prevTotals.comments || 0);
-                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
-                      })()
-                    : "soma do período selecionado"
-                }
-              />
-              <MetricTile
-                label="Compartilhamentos"
-                value={formatNumber(current.shares || 0)}
-                hint={
-                  prevTotals
-                    ? (() => {
-                        const delta = pctChange(current.shares || 0, prevTotals.shares || 0);
-                        return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
-                      })()
-                    : "soma do período selecionado"
-                }
               />
             </div>
 
@@ -1303,14 +1250,12 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Shorts (≤ 3m)"
                     value={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
                       const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "N/A";
                       const avgViews = shorts.reduce((acc, v) => acc + v.views, 0) / shorts.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const shorts = videosQuery.data.filter(v => v.duration_seconds <= 180);
                       const shorts = (videosQuery.data ?? []).filter(v => v.duration_seconds <= 180);
                       if (!shorts.length) return "";
                       const avgAvd = shorts.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / shorts.length;
@@ -1320,14 +1265,12 @@ function MetricsPage() {
                   <MetricTile
                     label="Média - Vídeos Longos (> 3m)"
                     value={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
                       const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "N/A";
                       const avgViews = longs.reduce((acc, v) => acc + v.views, 0) / longs.length;
                       return `${formatNumber(Math.round(avgViews))} views`;
                     })()}
                     hint={(() => {
-                      const longs = videosQuery.data.filter(v => v.duration_seconds > 180);
                       const longs = (videosQuery.data ?? []).filter(v => v.duration_seconds > 180);
                       if (!longs.length) return "";
                       const avgAvd = longs.reduce((acc, v) => acc + v.avg_view_duration_seconds, 0) / longs.length;
