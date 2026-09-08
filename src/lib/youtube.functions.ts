@@ -266,13 +266,13 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     
     let metricsQuery = (supabaseAdmin as any)
-      .from("youtube_video_metrics_period")
-      .select("video_id, period_end, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
+      .from("youtube_video_metrics_daily")
+      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
 
     if (data.days !== null) {
       const from = new Date();
       from.setDate(from.getDate() - data.days);
-      metricsQuery = metricsQuery.gte("period_end", from.toISOString().slice(0, 10));
+      metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
     }
 
     const { data: metrics, error: metricsError } = (await metricsQuery) as {
