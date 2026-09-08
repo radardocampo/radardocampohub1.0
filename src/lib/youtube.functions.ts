@@ -504,6 +504,7 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<GrowthGoal[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: goals, error } = await supabaseAdmin
+    const { data: goals, error } = await (supabaseAdmin as any)
       .from("growth_goals")
       .select("platform_id, metric, target_value, period")
       .eq("platform_id", data.platform_id)
@@ -511,4 +512,11 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
 
     if (error) throw new Error(error.message);
     return goals as GrowthGoal[];
+    // A tabela de metas ainda pode não existir no banco: nesse caso seguimos sem metas.
+    if (error) {
+      const msg = error.message ?? "";
+      if (error.code === "PGRST205" || msg.includes("growth_goals")) return [];
+      throw new Error(msg);
+    }
+    return (goals ?? []) as GrowthGoal[];
   });
