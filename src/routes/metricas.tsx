@@ -39,6 +39,7 @@ import {
   getPlatformGoals,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
+import { getTiktokMetrics, getTiktokTopVideos, type TiktokVideoRow } from "@/lib/tiktok.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -141,6 +142,8 @@ function MetricsPage() {
   const fetchBestTime = useServerFn(getYoutubeBestPostingTime);
   const fetchLatestSync = useServerFn(getLatestSyncLog);
   const fetchPlatformGoals = useServerFn(getPlatformGoals);
+  const fetchTiktokMetrics = useServerFn(getTiktokMetrics);
+  const fetchTiktokTopVideos = useServerFn(getTiktokTopVideos);
 
   const currentMonth = new Date().toISOString().slice(0, 7);
   const goalsQuery = useQuery({
@@ -196,6 +199,18 @@ function MetricsPage() {
     queryKey: ["youtube-best-time", days],
     queryFn: () => fetchBestTime({ data: { days } }),
     enabled: selected === "youtube",
+  });
+
+  const tiktokMetricsQuery = useQuery({
+    queryKey: ["tiktok-metrics", days],
+    queryFn: () => fetchTiktokMetrics({ data: { days } }),
+    enabled: selected === "tiktok",
+  });
+
+  const tiktokVideosQuery = useQuery({
+    queryKey: ["tiktok-videos", days],
+    queryFn: () => fetchTiktokTopVideos({ data: { days } }),
+    enabled: selected === "tiktok",
   });
 
   // --- Sync mutation: daily metrics (existing button) ---
@@ -324,6 +339,48 @@ function MetricsPage() {
     },
   });
 
+  // --- Sync mutation: TikTok metrics ---
+  const syncTiktokMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("sync-tiktok-metrics", {
+        method: "POST",
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {
+            /* ignore */
+          }
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data;
+    },
+    onMutate: () => {
+      toast.info("Iniciando sincronização do TikTok...", { id: "sync-tiktok" });
+    },
+    onSuccess: async () => {
+      toast.success("Sincronização do TikTok concluída com sucesso!", { id: "sync-tiktok" });
+      await queryClient.invalidateQueries({ queryKey: ["tiktok-metrics"] });
+      await queryClient.invalidateQueries({ queryKey: ["tiktok-videos"] });
+      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao sincronizar TikTok: ${message}`, {
+        id: "sync-tiktok",
+        duration: 8000,
+      });
+    },
+  });
+
   // --- Compute current period metrics ---
   const youtubeSnapshot = useMemo(() => {
     const rows = youtubeQuery.data ?? [];
@@ -381,6 +438,44 @@ function MetricsPage() {
     } as any;
   }, [youtubeQuery.data]);
 
+  const tiktokSnapshot = useMemo(() => {
+    const rows = tiktokMetricsQuery.data ?? [];
+    if (rows.length === 0) return null;
+
+    const series: MetricPoint[] = rows.map((row) => {
+      const parsed = new Date(`${row.date}T00:00:00`);
+      return {
+        date: row.date,
+        label: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+        followers: 0,
+        views: row.views,
+        likes: row.likes,
+        comments: row.comments,
+        shares: row.shares,
+        engagement_rate: row.engagement_rate,
+        synced_at: row.synced_at,
+      } as MetricPoint;
+    });
+
+    const totalViews = rows.reduce((acc, row) => acc + row.views, 0);
+    const totalLikes = rows.reduce((acc, row) => acc + row.likes, 0);
+    const totalComments = rows.reduce((acc, row) => acc + (row.comments || 0), 0);
+    const totalShares = rows.reduce((acc, row) => acc + (row.shares || 0), 0);
+    const avgEngagement = totalViews > 0 ? Number((((totalLikes + totalComments + totalShares) / totalViews) * 100).toFixed(2)) : 0;
+
+    return {
+      id: "tiktok",
+      followers: 0,
+      followersDelta: 0,
+      views: totalViews,
+      likes: totalLikes,
+      comments: totalComments,
+      shares: totalShares,
+      engagement_rate: avgEngagement,
+      series,
+    } as any;
+  }, [tiktokMetricsQuery.data]);
+
   // --- Compute previous period for percentage changes ---
   const prevTotals = useMemo(() => {
     const rows = youtubePrevQuery.data ?? [];
@@ -401,24 +496,37 @@ function MetricsPage() {
 
   const snapshots = useMemo(() => {
     const mocks = buildSnapshots(days ?? 365);
-    return mocks.map((snap) =>
-      snap.id === "youtube"
-        ? (youtubeSnapshot ?? {
-            ...snap,
-            followers: 0,
-            followersDelta: 0,
-            views: 0,
-            likes: 0,
-            engagement_rate: 0,
-            series: [],
-          })
-        : snap,
-    );
-  }, [days, youtubeSnapshot]);
+    return mocks.map((snap) => {
+      if (snap.id === "youtube") {
+        return youtubeSnapshot ?? {
+          ...snap,
+          followers: 0,
+          followersDelta: 0,
+          views: 0,
+          likes: 0,
+          engagement_rate: 0,
+          series: [],
+        };
+      }
+      if (snap.id === "tiktok") {
+        return tiktokSnapshot ?? {
+          ...snap,
+          followers: 0,
+          followersDelta: 0,
+          views: 0,
+          likes: 0,
+          engagement_rate: 0,
+          series: [],
+        };
+      }
+      return snap;
+    });
+  }, [days, youtubeSnapshot, tiktokSnapshot]);
 
   const current = snapshots.find((s) => s.id === selected) ?? snapshots[0]!;
   const meta = getPlatform(current.id);
   const isYoutube = selected === "youtube";
+  const isTiktok = selected === "tiktok";
 
   // --- Find peak day for views annotation ---
   const peakDay = useMemo(() => {
@@ -640,6 +748,18 @@ function MetricsPage() {
     );
   };
 
+  const handleConnectTiktok = () => {
+    const clientKey = import.meta.env.VITE_TIKTOK_CLIENT_KEY;
+    if (!clientKey) {
+      toast.error("Variável VITE_TIKTOK_CLIENT_KEY não encontrada no .env", { id: "sync-tiktok" });
+      return;
+    }
+    const redirectUri = "https://ziyuhenuuzetaedcneyb.supabase.co/functions/v1/auth-tiktok-callback";
+    const scopes = "user.info.basic,video.list,video.publish";
+    const url = `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&response_type=code&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=tiktok_auth`;
+    window.location.href = url;
+  };
+
   return (
     <AppShell
       title="Métricas"
@@ -707,6 +827,26 @@ function MetricsPage() {
               )}
             </div>
           )}
+
+          {isTiktok && (
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={() => syncTiktokMutation.mutate()}
+                disabled={syncTiktokMutation.isPending}
+                className="h-9 px-3 text-sm font-medium"
+              >
+                <RefreshCw className={`mr-2 size-4 ${syncTiktokMutation.isPending ? "animate-spin" : ""}`} />
+                Sincronizar TikTok
+              </Button>
+              <Button
+                onClick={handleConnectTiktok}
+                variant="outline"
+                className="h-9 px-3 text-sm font-medium"
+              >
+                Conectar TikTok
+              </Button>
+            </div>
+          )}
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -757,12 +897,12 @@ function MetricsPage() {
         })}
       </div>
 
-      {isYoutube ? (
+      {(isYoutube || isTiktok) ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">
-          <TabsList className="mb-8 grid w-full max-w-[640px] grid-cols-4">
+          <TabsList className={`mb-8 grid w-full max-w-[640px] grid-cols-${isTiktok ? "2" : "4"}`}>
             <TabsTrigger value="geral">Visão Geral</TabsTrigger>
-            <TabsTrigger value="retencao">Retenção</TabsTrigger>
-            <TabsTrigger value="audiencia">Audiência</TabsTrigger>
+            {isYoutube && <TabsTrigger value="retencao">Retenção</TabsTrigger>}
+            {isYoutube && <TabsTrigger value="audiencia">Audiência</TabsTrigger>}
             <TabsTrigger value="videos">Vídeos</TabsTrigger>
           </TabsList>
           
@@ -785,7 +925,7 @@ function MetricsPage() {
                         const delta = pctChange(current.views, prevTotals.views);
                         return delta !== null ? `${delta > 0 ? "+" : ""}${delta}% vs período anterior` : "soma do período";
                       })()
-                    : (youtubeQuery.data?.length ?? 0) < 2
+                    : (isYoutube ? (youtubeQuery.data?.length ?? 0) : (tiktokMetricsQuery.data?.length ?? 0)) < 2
                       ? "acumulando dados desde hoje"
                       : "soma do período selecionado"
                 }
@@ -1423,7 +1563,7 @@ function MetricsPage() {
                     <span className="flex items-center gap-3 font-medium">
                       <Icon className={`size-5 ${row.textClass}`} />
                       {row.name}
-                      {snap.id !== "youtube" && (
+                      {(snap.id !== "youtube" && snap.id !== "tiktok") && (
                         <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                           Demonstração
                         </span>

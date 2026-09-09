@@ -24,6 +24,7 @@ export function AppShell({
   subtitle,
   actions,
   children,
+  hideDemoWarning,
 }: {
   title: string;
   subtitle?: string;

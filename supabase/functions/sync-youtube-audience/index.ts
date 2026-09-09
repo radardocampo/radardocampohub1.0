@@ -84,7 +84,7 @@ serve(async (req) => {
           age_group: row[0],       // e.g. "age18-24"
           gender: row[1],          // e.g. "male", "female"
           viewer_percentage: row[2] || 0,
-          synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         }));
 
         const { error } = await supabase
@@ -126,7 +126,7 @@ serve(async (req) => {
           country_code: row[0],
           views: row[1] || 0,
           watch_time_minutes: row[2] || 0,
-          synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         }));
 
         const { error } = await supabase
@@ -163,7 +163,7 @@ serve(async (req) => {
           date: endDate,
           traffic_source_type: row[0],
           views: row[1] || 0,
-          synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         }));
 
         const { error } = await supabase
