@@ -7,12 +7,14 @@ import {
   Lightbulb,
   Radar,
   Sparkles,
+  MessageCircle,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/metricas", label: "Métricas", icon: BarChart3 },
+  { to: "/comentarios", label: "Comentários", icon: MessageCircle },
   { to: "/financeiro", label: "Financeiro", icon: Wallet },
   { to: "/rotina", label: "Rotina", icon: ListChecks },
   { to: "/ideias", label: "Banco de Ideias", icon: Lightbulb },
