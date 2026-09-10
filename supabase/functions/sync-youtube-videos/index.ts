@@ -184,10 +184,26 @@ serve(async (req) => {
     //    tab's own period filter only ever offers up to 90 days / "todo período" of
     //    whatever's been synced this way — lifetime totals for older videos come
     //    from statistics.viewCount above, not from this table).
+    //
+    //    The window starts at the channel's oldest synced video instead of a
+    //    fixed 90 days back — this channel only has ~8 months of history, so
+    //    fetching the whole thing costs the same 1 Analytics API call per video
+    //    (dimensions=day returns every matching day in one response either
+    //    way), it just asks for more days per call. That's what makes watch
+    //    time/AVD real for older videos too, instead of only the trailing
+    //    90-day slice.
     const today = new Date();
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(today.getDate() - 90);
-    const startDate = ninetyDaysAgo.toISOString().split("T")[0];
+    const publishedDates = Object.values(videoMeta)
+      .map((m) => m.published_at)
+      .filter((d): d is string => !!d);
+    const oldestPublished = publishedDates.length > 0
+      ? publishedDates.reduce((min, d) => (d < min ? d : min))
+      : null;
+    const fallbackNinetyDaysAgo = new Date();
+    fallbackNinetyDaysAgo.setDate(today.getDate() - 90);
+    const startDate = oldestPublished
+      ? oldestPublished.split("T")[0]
+      : fallbackNinetyDaysAgo.toISOString().split("T")[0];
     const endDate = today.toISOString().split("T")[0];
 
     let metricsUpserted = 0;

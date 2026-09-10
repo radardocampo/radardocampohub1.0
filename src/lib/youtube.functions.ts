@@ -297,9 +297,13 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
       if (videosError) throw new Error(videosError.message);
       if (!videos || videos.length === 0) return [];
 
+      // Same explicit-limit fix as the days!==null branch below: with full
+      // per-video history now synced (not just a 90-day trailing window), this
+      // can comfortably exceed the default row cap if left unbounded.
       const { data: dailyMetrics, error: dailyError } = await (supabaseAdmin as any)
         .from("youtube_video_metrics_daily")
-        .select("video_id, views, watch_time_hours, avg_view_duration_seconds") as {
+        .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
+        .limit(50000) as {
         data: Array<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
         error: { message: string } | null;
       };
@@ -340,10 +344,16 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
 
     const from = new Date();
     from.setDate(from.getDate() - data.days);
+    // Explicit generous limit: without it, Postgres/PostgREST's default row cap
+    // silently truncated wider windows (e.g. 90 dias, easily 10k+ rows across the
+    // whole catalog) to an arbitrary subset of rows — fewer distinct videos than
+    // a narrower window that fit under the cap, i.e. the count went backwards as
+    // the period grew instead of only growing.
     const { data: metrics, error: metricsError } = await (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
       .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds")
-      .gte("date", from.toISOString().slice(0, 10)) as {
+      .gte("date", from.toISOString().slice(0, 10))
+      .limit(50000) as {
       data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
       error: { message: string } | null;
     };
