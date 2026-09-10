@@ -203,10 +203,16 @@ function MetricsPage() {
     enabled: selected === "youtube",
   });
 
-  // --- Sync mutation: daily metrics, últimos 14 dias (rápido, baixo custo de cota de API) ---
+  // --- Sync mutation: um único botão "inteligente".
+  //     Se ainda não há histórico salvo (historyExistsQuery), faz o backfill completo
+  //     (mais lento, refaz tudo desde a criação do canal). Se já há histórico, faz só a
+  //     atualização rápida dos últimos 14 dias (sync-youtube-metrics), que é o caso do
+  //     dia a dia. Assim o usuário não precisa escolher manualmente qual rodar. ---
   const syncMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("sync-youtube-metrics", {
+      const isFirstSync = historyExistsQuery.data === false;
+      const fnName = isFirstSync ? "backfill-youtube-history" : "sync-youtube-metrics";
+      const { data, error } = await supabase.functions.invoke(fnName, {
         method: "POST",
       });
       if (error) {
@@ -225,15 +231,25 @@ function MetricsPage() {
       if (data && typeof data === "object" && "error" in data && data.error) {
         throw new Error(String((data as { error: unknown }).error));
       }
-      return data;
+      return { data, isFirstSync };
     },
     onMutate: () => {
-      toast.info("Sincronizando os últimos 14 dias do YouTube...", { id: "sync-youtube" });
+      const isFirstSync = historyExistsQuery.data === false;
+      toast.info(
+        isFirstSync
+          ? "Nenhum histórico encontrado — preenchendo todo o histórico do canal. Isso pode levar alguns segundos..."
+          : "Sincronizando os últimos 14 dias do YouTube...",
+        { id: "sync-youtube" },
+      );
     },
-    onSuccess: async () => {
-      toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
+    onSuccess: async ({ isFirstSync }) => {
+      toast.success(
+        isFirstSync ? "Histórico preenchido com sucesso!" : "Sincronização concluída com sucesso!",
+        { id: "sync-youtube" },
+      );
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
       await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
@@ -245,48 +261,6 @@ function MetricsPage() {
         id: "sync-youtube",
         duration: 8000,
       });
-    },
-  });
-
-  // --- Backfill mutation: reprocessa o histórico completo desde a criação do canal.
-  //     Mais lento e consome mais cota de API — use apenas quando não houver histórico
-  //     ainda ou para forçar a recaptura de correções retroativas do YouTube. ---
-  const backfillMutation = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
-        method: "POST",
-      });
-      if (error) {
-        let detail = error.message;
-        const response = (error as { context?: Response }).context;
-        if (response && typeof response.json === "function") {
-          try {
-            const body = await response.clone().json();
-            if (body?.error) detail = String(body.error);
-          } catch {
-            /* ignore */
-          }
-        }
-        throw new Error(detail);
-      }
-      if (data && typeof data === "object" && "error" in data && data.error) {
-        throw new Error(String((data as { error: unknown }).error));
-      }
-      return data;
-    },
-    onMutate: () => {
-      toast.info("Iniciando backfill histórico completo. Isso pode levar alguns segundos...", { id: "backfill-youtube" });
-    },
-    onSuccess: async () => {
-      toast.success("Histórico preenchido com sucesso!", { id: "backfill-youtube" });
-      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
-      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
-      await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
-    },
-    onError: (error: unknown) => {
-      const message = error instanceof Error ? error.message : "Erro desconhecido";
-      toast.error(`Falha no backfill: ${message}`, { id: "backfill-youtube", duration: 8000 });
     },
   });
 
@@ -723,33 +697,13 @@ function MetricsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs">
-                    Atualiza as métricas diárias gerais (views, inscritos, engajamento) dos últimos 14 dias.
+                    Atualiza as métricas diárias gerais (views, inscritos, engajamento).
+                    {historyExistsQuery.data === false
+                      ? " Nenhum histórico encontrado ainda — vai buscar tudo desde a criação do canal (mais lento)."
+                      : " Busca só os últimos 14 dias (rápido)."}
                     {current?.series?.[current.series.length - 1]?.synced_at && (
                       <span className="block mt-1 text-muted-foreground">
                         Última sync: {new Date(current.series[current.series.length - 1].synced_at).toLocaleString("pt-BR")}
-                      </span>
-                    )}
-                  </TooltipContent>
-                </UITooltip>
-
-                <UITooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      onClick={() => backfillMutation.mutate()}
-                      disabled={backfillMutation.isPending}
-                      className="h-9 px-3 text-sm font-medium"
-                    >
-                      <RefreshCw className={`mr-2 size-4 ${backfillMutation.isPending ? "animate-spin" : ""}`} />
-                      Backfill Completo
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    Reprocessa todo o histórico do canal desde a criação (mais lento). Use quando ainda
-                    não houver dados ou para recapturar correções retroativas do YouTube.
-                    {historyExistsQuery.data === false && (
-                      <span className="block mt-1 font-medium text-warning">
-                        Nenhum histórico encontrado ainda — recomendado rodar isso primeiro.
                       </span>
                     )}
                   </TooltipContent>
