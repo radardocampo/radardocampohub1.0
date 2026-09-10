@@ -55,6 +55,8 @@ export type YoutubeCommentReplyRow = {
   published_at: string;
 };
 
+export type YoutubeModerationStatus = "published" | "heldForReview" | "rejected";
+
 export type YoutubeCommentRow = {
   comment_id: string;
   video_id: string;
@@ -67,6 +69,7 @@ export type YoutubeCommentRow = {
   total_reply_count: number;
   has_owner_reply: boolean;
   can_reply: boolean;
+  moderation_status: YoutubeModerationStatus;
   published_at: string;
   replies: YoutubeCommentReplyRow[];
 };
@@ -517,41 +520,63 @@ export type YoutubeCommentsResult = {
   comments: YoutubeCommentRow[];
   totalCount: number;
   unansweredCount: number;
+  pendingCount: number;
 };
 
 /**
  * Lê comentários já sincronizados (com respostas), mais recentes primeiro.
- * Retorna também totalCount/unansweredCount (contagens reais, sem o corte de
- * .limit(200) da listagem) para deixar visível quando os dois filtros batem
- * por coincidência dos dados — por exemplo, se o canal nunca respondeu nada
- * ainda, "Não respondidos" e "Todos" são legitimamente o mesmo conjunto.
+ * Retorna também totalCount/unansweredCount/pendingCount (contagens reais, sem
+ * o corte de .limit(200) da listagem) para deixar visível quando os filtros
+ * batem por coincidência dos dados — por exemplo, se o canal nunca respondeu
+ * nada com texto ainda (só com "coração", que a API não expõe), "Não
+ * respondidos" e "Todos" são legitimamente o mesmo conjunto.
+ *
+ * filter "pending" mostra a fila de moderação (moderation_status =
+ * heldForReview) — comentários que a própria API do YouTube ainda não tornou
+ * públicos, separado dos demais porque não fazem parte do fluxo normal de
+ * resposta.
  */
 export const getYoutubeComments = createServerFn({ method: "GET" })
-  .inputValidator((data: { filter: "all" | "unanswered" }) => data)
+  .inputValidator((data: { filter: "all" | "unanswered" | "pending" }) => data)
   .handler(async ({ data }): Promise<YoutubeCommentsResult> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const [{ count: totalCount }, { count: unansweredCount }] = await Promise.all([
-      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("has_owner_reply", false),
+    const [{ count: totalCount }, { count: unansweredCount }, { count: pendingCount }] = await Promise.all([
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("moderation_status", "published"),
+      supabaseAdmin
+        .from("youtube_comments")
+        .select("*", { count: "exact", head: true })
+        .eq("moderation_status", "published")
+        .eq("has_owner_reply", false),
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("moderation_status", "heldForReview"),
     ]);
 
     let query = supabaseAdmin
       .from("youtube_comments")
       .select(
-        "comment_id, video_id, author_display_name, author_profile_image_url, text_display, like_count, total_reply_count, has_owner_reply, can_reply, published_at",
+        "comment_id, video_id, author_display_name, author_profile_image_url, text_display, like_count, total_reply_count, has_owner_reply, can_reply, moderation_status, published_at",
       )
       .order("published_at", { ascending: false })
       .limit(200);
 
-    if (data.filter === "unanswered") {
-      query = query.eq("has_owner_reply", false);
+    if (data.filter === "pending") {
+      query = query.eq("moderation_status", "heldForReview");
+    } else {
+      query = query.eq("moderation_status", "published");
+      if (data.filter === "unanswered") {
+        query = query.eq("has_owner_reply", false);
+      }
     }
 
     const { data: comments, error } = await query;
     if (error) throw new Error(error.message);
     if (!comments || comments.length === 0) {
-      return { comments: [], totalCount: totalCount ?? 0, unansweredCount: unansweredCount ?? 0 };
+      return {
+        comments: [],
+        totalCount: totalCount ?? 0,
+        unansweredCount: unansweredCount ?? 0,
+        pendingCount: pendingCount ?? 0,
+      };
     }
 
     const commentIds = comments.map((c) => c.comment_id);
@@ -594,10 +619,21 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
         total_reply_count: Number(c.total_reply_count),
         has_owner_reply: c.has_owner_reply,
         can_reply: c.can_reply,
+        moderation_status: c.moderation_status as YoutubeModerationStatus,
         published_at: c.published_at ?? "",
         replies: repliesByComment.get(c.comment_id) ?? [],
       };
     });
 
-    return { comments: mapped, totalCount: totalCount ?? 0, unansweredCount: unansweredCount ?? 0 };
+    return {
+      comments: mapped,
+      totalCount: totalCount ?? 0,
+      unansweredCount: unansweredCount ?? 0,
+      pendingCount: pendingCount ?? 0,
+    };
   });
+
+export type ModerateCommentInput = {
+  comment_id: string;
+  moderation_status: YoutubeModerationStatus;
+};

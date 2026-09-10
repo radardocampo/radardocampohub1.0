@@ -411,6 +411,7 @@ export type Database = {
           comment_id: string
           has_owner_reply: boolean
           like_count: number
+          moderation_status: string
           published_at: string | null
           synced_at: string
           text_display: string | null
@@ -426,6 +427,7 @@ export type Database = {
           comment_id: string
           has_owner_reply?: boolean
           like_count?: number
+          moderation_status?: string
           published_at?: string | null
           synced_at?: string
           text_display?: string | null
@@ -441,6 +443,7 @@ export type Database = {
           comment_id?: string
           has_owner_reply?: boolean
           like_count?: number
+          moderation_status?: string
           published_at?: string | null
           synced_at?: string
           text_display?: string | null

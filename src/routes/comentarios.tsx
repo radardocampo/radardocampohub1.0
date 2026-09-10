@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, MessageCircle, Send } from "lucide-react";
+import { RefreshCw, MessageCircle, Send, Check, Clock, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/platforms";
 import { supabase } from "@/integrations/supabase/client";
-import { getYoutubeComments, getLatestSyncLog } from "@/lib/youtube.functions";
+import { getYoutubeComments, getLatestSyncLog, type YoutubeModerationStatus } from "@/lib/youtube.functions";
 
 export const Route = createFileRoute("/comentarios")({
   head: () => ({
@@ -20,15 +20,24 @@ export const Route = createFileRoute("/comentarios")({
       { title: "Comentários — Radar do Campo Hub" },
       {
         name: "description",
-        content: "Veja e responda os comentários do seu canal do YouTube em um só lugar.",
+        content: "Veja, responda e modere os comentários do seu canal do YouTube em um só lugar.",
       },
     ],
   }),
   component: CommentsPage,
 });
 
+const COMMENT_FILTERS = ["unanswered", "all", "pending"] as const;
+type CommentFilter = (typeof COMMENT_FILTERS)[number];
+
+const FILTER_LABELS: Record<CommentFilter, string> = {
+  unanswered: "Não respondidos",
+  all: "Todos",
+  pending: "Aguardando moderação",
+};
+
 function CommentsPage() {
-  const [commentFilter, setCommentFilter] = useState<"all" | "unanswered">("unanswered");
+  const [commentFilter, setCommentFilter] = useState<CommentFilter>("unanswered");
   const [openReplyFor, setOpenReplyFor] = useState<string | null>(null);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
@@ -46,8 +55,9 @@ function CommentsPage() {
     queryFn: () => fetchLatestSync({ data: { platform_id: "youtube" } }),
   });
 
-  // --- Sync mutation: só comentários (leitura). A única ação de escrita no
-  //     YouTube nesta página é a resposta (replyMutation), abaixo. ---
+  // --- Sync mutation: só comentários (leitura). As ações de escrita no YouTube
+  //     nesta página são a resposta (replyMutation) e a moderação
+  //     (moderateMutation), abaixo. ---
   const syncCommentsMutation = useMutation({
     mutationFn: async () => {
       const { error, data } = await supabase.functions.invoke("sync-youtube-comments", { method: "POST" });
@@ -78,8 +88,7 @@ function CommentsPage() {
     },
   });
 
-  // --- Reply mutation: posts a reply to a top-level comment (the only YouTube-write
-  //     action here — see CLAUDE.md for why there's no delete/moderate/like action). ---
+  // --- Reply mutation: posts a reply to a top-level comment. ---
   const replyMutation = useMutation({
     mutationFn: async ({ commentId, text }: { commentId: string; text: string }) => {
       const { error, data } = await supabase.functions.invoke("reply-youtube-comment", {
@@ -118,6 +127,40 @@ function CommentsPage() {
     },
   });
 
+  // --- Moderate mutation: approve / hold for review / reject (spam). This only
+  //     changes visibility on YouTube's side — never a delete (see CLAUDE.md). ---
+  const moderateMutation = useMutation({
+    mutationFn: async ({ commentId, status }: { commentId: string; status: YoutubeModerationStatus }) => {
+      const { error, data } = await supabase.functions.invoke("moderate-youtube-comment", {
+        method: "POST",
+        body: { comment_id: commentId, moderation_status: status },
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return data;
+    },
+    onMutate: () => {
+      toast.info("Atualizando moderação...", { id: "moderate-comment" });
+    },
+    onSuccess: async () => {
+      toast.success("Comentário atualizado!", { id: "moderate-comment" });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-comments"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao moderar: ${message}`, { id: "moderate-comment", duration: 8000 });
+    },
+  });
+
   return (
     <AppShell
       title="Comentários"
@@ -138,7 +181,7 @@ function CommentsPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Busca os comentários mais recentes de todos os vídeos do canal (até 1000 por vez).
+                Busca comentários publicados e a fila de moderação (até 1000 de cada por vez).
               </TooltipContent>
             </UITooltip>
           </TooltipProvider>
@@ -166,7 +209,7 @@ function CommentsPage() {
     >
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex gap-1 rounded-lg bg-secondary p-1">
-          {(["unanswered", "all"] as const).map((f) => (
+          {COMMENT_FILTERS.map((f) => (
             <Button
               key={f}
               size="sm"
@@ -174,13 +217,18 @@ function CommentsPage() {
               onClick={() => setCommentFilter(f)}
               className="px-4 text-sm font-medium"
             >
-              {f === "unanswered" ? "Não respondidos" : "Todos"}
+              {FILTER_LABELS[f]}
+              {f === "pending" && (commentsQuery.data?.pendingCount ?? 0) > 0 && (
+                <span className="ml-2 rounded-full bg-warning/20 px-1.5 text-xs text-warning">
+                  {commentsQuery.data?.pendingCount}
+                </span>
+              )}
             </Button>
           ))}
         </div>
         <p className="text-sm text-muted-foreground">
           {commentsQuery.data
-            ? `${commentsQuery.data.unansweredCount} sem resposta de ${commentsQuery.data.totalCount} no total`
+            ? `${commentsQuery.data.unansweredCount} sem resposta de ${commentsQuery.data.totalCount} publicados`
             : "…"}
         </p>
       </div>
@@ -195,7 +243,7 @@ function CommentsPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed rounded-xl border-border bg-surface-1/50 my-8">
           <MessageCircle className="size-12 text-muted-foreground/30 mb-4" />
           <h3 className="text-xl font-semibold mb-2">
-            {commentFilter === "unanswered" ? "Nenhum comentário pendente" : "Nenhum comentário encontrado"}
+            {commentFilter === "pending" ? "Nada aguardando moderação" : commentFilter === "unanswered" ? "Nenhum comentário pendente" : "Nenhum comentário encontrado"}
           </h3>
           <p className="text-muted-foreground max-w-sm">
             Clique em "Sincronizar Comentários" para buscar os comentários mais recentes do canal.
@@ -206,6 +254,7 @@ function CommentsPage() {
           {commentsQuery.data!.comments.map((c) => {
             const isReplying = openReplyFor === c.comment_id;
             const draft = replyDrafts[c.comment_id] ?? "";
+            const isModerating = moderateMutation.isPending && moderateMutation.variables?.commentId === c.comment_id;
             return (
               <article key={c.comment_id} className="panel p-5">
                 <div className="flex items-start gap-3">
@@ -219,6 +268,16 @@ function CommentsPage() {
                       <span className="text-xs text-muted-foreground">
                         {c.published_at ? new Date(c.published_at).toLocaleDateString("pt-BR") : ""}
                       </span>
+                      {c.moderation_status === "heldForReview" && (
+                        <span className="text-xs bg-warning/10 text-warning px-2 py-0.5 rounded-full font-medium">
+                          Aguardando moderação
+                        </span>
+                      )}
+                      {c.moderation_status === "rejected" && (
+                        <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded-full font-medium">
+                          Marcado como spam
+                        </span>
+                      )}
                       {c.has_owner_reply && (
                         <span className="text-xs bg-success/10 text-success px-2 py-0.5 rounded-full font-medium">
                           Respondido
@@ -247,44 +306,76 @@ function CommentsPage() {
                       </div>
                     )}
 
-                    {c.can_reply &&
-                      (isReplying ? (
-                        <div className="mt-3 flex flex-col gap-2">
-                          <Textarea
-                            value={draft}
-                            onChange={(e) =>
-                              setReplyDrafts((prev) => ({ ...prev, [c.comment_id]: e.target.value }))
-                            }
-                            placeholder="Escreva sua resposta..."
-                            className="text-sm"
-                            rows={2}
-                          />
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              disabled={!draft.trim() || replyMutation.isPending}
-                              onClick={() =>
-                                replyMutation.mutate({ commentId: c.comment_id, text: draft.trim() })
-                              }
-                            >
-                              <Send className="mr-2 size-3.5" />
-                              Enviar
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setOpenReplyFor(null)}>
-                              Cancelar
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {c.can_reply && !isReplying && (
+                        <Button size="sm" variant="outline" onClick={() => setOpenReplyFor(c.comment_id)}>
+                          Responder
+                        </Button>
+                      )}
+                      {c.moderation_status !== "published" && (
                         <Button
                           size="sm"
                           variant="outline"
-                          className="mt-3"
-                          onClick={() => setOpenReplyFor(c.comment_id)}
+                          disabled={isModerating}
+                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "published" })}
                         >
-                          Responder
+                          <Check className="mr-2 size-3.5" />
+                          Aprovar
                         </Button>
-                      ))}
+                      )}
+                      {c.moderation_status !== "heldForReview" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isModerating}
+                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "heldForReview" })}
+                        >
+                          <Clock className="mr-2 size-3.5" />
+                          Reter para análise
+                        </Button>
+                      )}
+                      {c.moderation_status !== "rejected" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive hover:text-destructive"
+                          disabled={isModerating}
+                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "rejected" })}
+                        >
+                          <ShieldAlert className="mr-2 size-3.5" />
+                          Marcar como spam
+                        </Button>
+                      )}
+                    </div>
+
+                    {isReplying && (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <Textarea
+                          value={draft}
+                          onChange={(e) =>
+                            setReplyDrafts((prev) => ({ ...prev, [c.comment_id]: e.target.value }))
+                          }
+                          placeholder="Escreva sua resposta..."
+                          className="text-sm"
+                          rows={2}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            disabled={!draft.trim() || replyMutation.isPending}
+                            onClick={() =>
+                              replyMutation.mutate({ commentId: c.comment_id, text: draft.trim() })
+                            }
+                          >
+                            <Send className="mr-2 size-3.5" />
+                            Enviar
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setOpenReplyFor(null)}>
+                            Cancelar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </article>
