@@ -265,25 +265,85 @@ export const getYoutubeTrafficSources = createServerFn({ method: "GET" })
     }));
   });
 
-/** Lê ranking de vídeos com métricas (join youtube_videos + youtube_video_metrics_daily). */
+/**
+ * Lê ranking de vídeos com métricas.
+ *
+ * Com um período específico (7/30/90 dias), agrega youtube_video_metrics_daily
+ * filtrado por data — reflete corretamente "desempenho nesses dias".
+ *
+ * Com "Todo período" (days=null), monta a lista a partir de youtube_videos
+ * inteiro (todo vídeo já sincronizado), usando views/curtidas/comentários
+ * vitalícios (da Data API, independente de qualquer janela de datas). Antes,
+ * mesmo "Todo período" ficava preso à tabela de métricas diárias, que só tem
+ * linhas pra vídeos com views dentro da janela de ~90 dias da última
+ * sincronização — um vídeo antigo sem views recentes simplesmente não
+ * aparecia, mesmo estando sincronizado, e o vídeo "mais antigo" mostrado não
+ * era o mais antigo de verdade. Tempo de exibição e AVD continuam vindo da
+ * tabela diária (a Data API não expõe watch time histórico), então para
+ * vídeos antigos esses dois campos podem ficar subestimados — mas o vídeo em
+ * si nunca mais desaparece da lista.
+ */
 export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .inputValidator((data: { days: number | null }) => ({
     days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
   }))
   .handler(async ({ data }): Promise<YoutubeVideoRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    
-    let metricsQuery = (supabaseAdmin as any)
-      .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
+    if (data.days === null) {
+      const { data: videos, error: videosError } = await supabaseAdmin
+        .from("youtube_videos")
+        .select("video_id, title, thumbnail_url, published_at, duration_seconds, lifetime_views, lifetime_likes, lifetime_comment_count");
+      if (videosError) throw new Error(videosError.message);
+      if (!videos || videos.length === 0) return [];
+
+      const { data: dailyMetrics, error: dailyError } = await (supabaseAdmin as any)
+        .from("youtube_video_metrics_daily")
+        .select("video_id, views, watch_time_hours, avg_view_duration_seconds") as {
+        data: Array<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
+        error: { message: string } | null;
+      };
+      if (dailyError) throw new Error(dailyError.message);
+
+      const watchTimeMap = new Map<string, { watch_time: number; avd_weighted_sum: number; views: number }>();
+      for (const m of dailyMetrics ?? []) {
+        const curr = watchTimeMap.get(m.video_id) ?? { watch_time: 0, avd_weighted_sum: 0, views: 0 };
+        const dailyViews = Number(m.views);
+        curr.watch_time += Number(m.watch_time_hours ?? 0);
+        curr.avd_weighted_sum += Number(m.avg_view_duration_seconds ?? 0) * dailyViews;
+        curr.views += dailyViews;
+        watchTimeMap.set(m.video_id, curr);
+      }
+
+      return videos
+        .map((v) => {
+          const views = Number(v.lifetime_views ?? 0);
+          const likes = Number(v.lifetime_likes ?? 0);
+          const comments = Number(v.lifetime_comment_count ?? 0);
+          const watchStats = watchTimeMap.get(v.video_id);
+          return {
+            video_id: v.video_id,
+            title: v.title ?? "",
+            thumbnail_url: v.thumbnail_url ?? "",
+            published_at: v.published_at ?? "",
+            duration_seconds: v.duration_seconds ?? 0,
+            views,
+            likes,
+            comments,
+            watch_time_hours: watchStats?.watch_time ?? 0,
+            avg_view_duration_seconds: watchStats && watchStats.views > 0 ? watchStats.avd_weighted_sum / watchStats.views : 0,
+            eng_rate: views > 0 ? ((likes + comments) / views) * 100 : 0,
+          };
+        })
+        .sort((a, b) => b.views - a.views);
     }
 
-    const { data: metrics, error: metricsError } = (await metricsQuery) as {
+    const from = new Date();
+    from.setDate(from.getDate() - data.days);
+    const { data: metrics, error: metricsError } = await (supabaseAdmin as any)
+      .from("youtube_video_metrics_daily")
+      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds")
+      .gte("date", from.toISOString().slice(0, 10)) as {
       data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
       error: { message: string } | null;
     };
@@ -312,8 +372,7 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
         watch_time_hours: val.watch_time,
         avg_view_duration_seconds: val.views > 0 ? val.avd_weighted_sum / val.views : 0,
       }))
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 50);
+      .sort((a, b) => b.views - a.views);
 
     const videoIds = aggregatedList.map((m) => m.video_id);
     const { data: videos, error: videosError } = await supabaseAdmin

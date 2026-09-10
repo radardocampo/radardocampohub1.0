@@ -128,7 +128,7 @@ serve(async (req) => {
     //    batches of 50. statistics.viewCount is the channel-lifetime view count for
     //    that video, independent of any date window — this is what Melhor Horário
     //    uses so old and new videos are compared on equal footing.
-    const videoMeta: Record<string, { title: string; thumbnail_url: string; published_at: string; duration_seconds: number; lifetime_views: number }> = {};
+    const videoMeta: Record<string, { title: string; thumbnail_url: string; published_at: string; duration_seconds: number; lifetime_views: number; lifetime_likes: number; lifetime_comment_count: number }> = {};
 
     for (let i = 0; i < videoIds.length; i += 50) {
       const batch = videoIds.slice(i, i + 50);
@@ -151,6 +151,8 @@ serve(async (req) => {
           published_at: item.snippet.publishedAt,
           duration_seconds: parseDuration(item.contentDetails.duration || "PT0S"),
           lifetime_views: Number(item.statistics?.viewCount ?? 0),
+          lifetime_likes: Number(item.statistics?.likeCount ?? 0),
+          lifetime_comment_count: Number(item.statistics?.commentCount ?? 0),
         };
       }
     }
@@ -163,6 +165,8 @@ serve(async (req) => {
       published_at: meta.published_at,
       duration_seconds: meta.duration_seconds,
       lifetime_views: meta.lifetime_views,
+      lifetime_likes: meta.lifetime_likes,
+      lifetime_comment_count: meta.lifetime_comment_count,
       updated_at: new Date().toISOString(),
     }));
 

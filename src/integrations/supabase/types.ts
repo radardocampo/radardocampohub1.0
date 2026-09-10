@@ -549,6 +549,8 @@ export type Database = {
       youtube_videos: {
         Row: {
           duration_seconds: number | null
+          lifetime_comment_count: number | null
+          lifetime_likes: number | null
           lifetime_views: number | null
           published_at: string | null
           thumbnail_url: string | null
@@ -558,6 +560,8 @@ export type Database = {
         }
         Insert: {
           duration_seconds?: number | null
+          lifetime_comment_count?: number | null
+          lifetime_likes?: number | null
           lifetime_views?: number | null
           published_at?: string | null
           thumbnail_url?: string | null
@@ -567,6 +571,8 @@ export type Database = {
         }
         Update: {
           duration_seconds?: number | null
+          lifetime_comment_count?: number | null
+          lifetime_likes?: number | null
           lifetime_views?: number | null
           published_at?: string | null
           thumbnail_url?: string | null
