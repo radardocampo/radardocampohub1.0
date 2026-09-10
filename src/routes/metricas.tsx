@@ -1205,6 +1205,7 @@ function MetricsPage() {
               </div>
               <p className="text-sm text-muted-foreground">
                 {filteredVideos.length} vídeo{filteredVideos.length !== 1 ? "s" : ""}
+                {days !== null && " publicado" + (filteredVideos.length !== 1 ? "s" : "") + " nos últimos " + days + " dias"}
               </p>
             </div>
 

@@ -270,20 +270,20 @@ export const getYoutubeTrafficSources = createServerFn({ method: "GET" })
 /**
  * Lê ranking de vídeos com métricas.
  *
- * Com um período específico (7/30/90 dias), agrega youtube_video_metrics_daily
- * filtrado por data — reflete corretamente "desempenho nesses dias".
+ * O filtro de período (7/30/90 dias ou "Todo período") escolhe quais vídeos
+ * entram na lista pela data de PUBLICAÇÃO (published_at) — "vídeos que lancei
+ * nessa janela" — não por terem tido alguma visualização nesses dias. A
+ * primeira versão filtrava por atividade recente, mas quase todo vídeo do
+ * canal ainda recebe visualizações residuais todos os dias, então o total
+ * empacava no mesmo número em 7, 30 e 90 dias e só "Todo período" mudava —
+ * confuso, já que a contagem parecia ignorar o filtro.
  *
- * Com "Todo período" (days=null), monta a lista a partir de youtube_videos
- * inteiro (todo vídeo já sincronizado), usando views/curtidas/comentários
- * vitalícios (da Data API, independente de qualquer janela de datas). Antes,
- * mesmo "Todo período" ficava preso à tabela de métricas diárias, que só tem
- * linhas pra vídeos com views dentro da janela de ~90 dias da última
- * sincronização — um vídeo antigo sem views recentes simplesmente não
- * aparecia, mesmo estando sincronizado, e o vídeo "mais antigo" mostrado não
- * era o mais antigo de verdade. Tempo de exibição e AVD continuam vindo da
- * tabela diária (a Data API não expõe watch time histórico), então para
- * vídeos antigos esses dois campos podem ficar subestimados — mas o vídeo em
- * si nunca mais desaparece da lista.
+ * As métricas de cada vídeo (views/curtidas/comentários) são sempre
+ * vitalícias (da Data API, statistics.viewCount etc.) independente da
+ * janela, porque um vídeo publicado há poucos dias dentro do período já
+ * carrega praticamente todo seu histórico ali mesmo. Tempo de exibição e AVD
+ * vêm de youtube_video_metrics_daily (a Data API não expõe watch time), sem
+ * filtro de data — vitalícios pelo mesmo motivo.
  */
 export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .inputValidator((data: { days: number | null }) => ({
@@ -292,129 +292,67 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<YoutubeVideoRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    if (data.days === null) {
-      const { data: videos, error: videosError } = await supabaseAdmin
-        .from("youtube_videos")
-        .select("video_id, title, thumbnail_url, published_at, duration_seconds, lifetime_views, lifetime_likes, lifetime_comment_count");
-      if (videosError) throw new Error(videosError.message);
-      if (!videos || videos.length === 0) return [];
+    let videosQuery = supabaseAdmin
+      .from("youtube_videos")
+      .select("video_id, title, thumbnail_url, published_at, duration_seconds, lifetime_views, lifetime_likes, lifetime_comment_count");
 
-      // Paginated (see fetchAllRows): with full per-video history now synced
-      // (not just a 90-day trailing window), this table comfortably exceeds
-      // this project's 1000-row PostgREST response cap, which no `.limit()`
-      // can raise — a single unbounded/high-limit select silently came back
-      // truncated to an arbitrary ~1000 rows covering a handful of videos.
-      const dailyMetrics = await fetchAllRows<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
-        (rangeFrom, rangeTo) =>
-          (supabaseAdmin as any)
-            .from("youtube_video_metrics_daily")
-            .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
-            .order("id", { ascending: true })
-            .range(rangeFrom, rangeTo),
-      );
-
-      const watchTimeMap = new Map<string, { watch_time: number; avd_weighted_sum: number; views: number }>();
-      for (const m of dailyMetrics) {
-        const curr = watchTimeMap.get(m.video_id) ?? { watch_time: 0, avd_weighted_sum: 0, views: 0 };
-        const dailyViews = Number(m.views);
-        curr.watch_time += Number(m.watch_time_hours ?? 0);
-        curr.avd_weighted_sum += Number(m.avg_view_duration_seconds ?? 0) * dailyViews;
-        curr.views += dailyViews;
-        watchTimeMap.set(m.video_id, curr);
-      }
-
-      return videos
-        .map((v) => {
-          const views = Number(v.lifetime_views ?? 0);
-          const likes = Number(v.lifetime_likes ?? 0);
-          const comments = Number(v.lifetime_comment_count ?? 0);
-          const watchStats = watchTimeMap.get(v.video_id);
-          return {
-            video_id: v.video_id,
-            title: v.title ?? "",
-            thumbnail_url: v.thumbnail_url ?? "",
-            published_at: v.published_at ?? "",
-            duration_seconds: v.duration_seconds ?? 0,
-            views,
-            likes,
-            comments,
-            watch_time_hours: watchStats?.watch_time ?? 0,
-            avg_view_duration_seconds: watchStats && watchStats.views > 0 ? watchStats.avd_weighted_sum / watchStats.views : 0,
-            eng_rate: views > 0 ? ((likes + comments) / views) * 100 : 0,
-          };
-        })
-        .sort((a, b) => b.views - a.views);
+    if (data.days !== null) {
+      const from = new Date();
+      from.setDate(from.getDate() - data.days);
+      videosQuery = videosQuery.gte("published_at", from.toISOString());
     }
 
-    const from = new Date();
-    from.setDate(from.getDate() - data.days);
-    const fromDateStr = from.toISOString().slice(0, 10);
-    // Paginated (see fetchAllRows): wider windows (e.g. 90 dias) easily exceed
-    // this project's 1000-row PostgREST response cap across the whole catalog,
-    // and no `.limit()` value raises that cap — it silently truncated to an
-    // arbitrary subset of rows, so the video count went backwards as the
-    // period grew instead of only growing.
-    const metrics = await fetchAllRows<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
+    const { data: videos, error: videosError } = await videosQuery;
+    if (videosError) throw new Error(videosError.message);
+    if (!videos || videos.length === 0) return [];
+
+    const videoIds = videos.map((v) => v.video_id);
+    // Paginated (see fetchAllRows): a project's PostgREST response cap (1000
+    // rows here) silently truncates any unbounded/high-`.limit()` select —
+    // no client-side limit value can raise it. Scoped to just this window's
+    // video_ids (small even for "Todo período", ~134 videos) rather than the
+    // whole table, so this stays cheap for narrow windows too.
+    const dailyMetrics = await fetchAllRows<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
       (rangeFrom, rangeTo) =>
         (supabaseAdmin as any)
           .from("youtube_video_metrics_daily")
-          .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds")
-          .gte("date", fromDateStr)
+          .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
+          .in("video_id", videoIds)
           .order("id", { ascending: true })
           .range(rangeFrom, rangeTo),
     );
-    if (metrics.length === 0) return [];
 
-    const map = new Map<string, { views: number; likes: number; comments: number; watch_time: number; avd_weighted_sum: number; count: number }>();
-    for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, likes: 0, comments: 0, watch_time: 0, avd_weighted_sum: 0, count: 0 };
+    const watchTimeMap = new Map<string, { watch_time: number; avd_weighted_sum: number; views: number }>();
+    for (const m of dailyMetrics) {
+      const curr = watchTimeMap.get(m.video_id) ?? { watch_time: 0, avd_weighted_sum: 0, views: 0 };
       const dailyViews = Number(m.views);
+      curr.watch_time += Number(m.watch_time_hours ?? 0);
+      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds ?? 0) * dailyViews;
       curr.views += dailyViews;
-      curr.likes += Number(m.likes);
-      curr.comments += Number(m.comments);
-      curr.watch_time += Number(m.watch_time_hours);
-      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
-      curr.count += 1;
-      map.set(m.video_id, curr);
+      watchTimeMap.set(m.video_id, curr);
     }
 
-    const aggregatedList = Array.from(map.entries())
-      .map(([id, val]) => ({
-        video_id: id,
-        views: val.views,
-        likes: val.likes,
-        comments: val.comments,
-        watch_time_hours: val.watch_time,
-        avg_view_duration_seconds: val.views > 0 ? val.avd_weighted_sum / val.views : 0,
-      }))
+    return videos
+      .map((v) => {
+        const views = Number(v.lifetime_views ?? 0);
+        const likes = Number(v.lifetime_likes ?? 0);
+        const comments = Number(v.lifetime_comment_count ?? 0);
+        const watchStats = watchTimeMap.get(v.video_id);
+        return {
+          video_id: v.video_id,
+          title: v.title ?? "",
+          thumbnail_url: v.thumbnail_url ?? "",
+          published_at: v.published_at ?? "",
+          duration_seconds: v.duration_seconds ?? 0,
+          views,
+          likes,
+          comments,
+          watch_time_hours: watchStats?.watch_time ?? 0,
+          avg_view_duration_seconds: watchStats && watchStats.views > 0 ? watchStats.avd_weighted_sum / watchStats.views : 0,
+          eng_rate: views > 0 ? ((likes + comments) / views) * 100 : 0,
+        };
+      })
       .sort((a, b) => b.views - a.views);
-
-    const videoIds = aggregatedList.map((m) => m.video_id);
-    const { data: videos, error: videosError } = await supabaseAdmin
-      .from("youtube_videos")
-      .select("video_id, title, thumbnail_url, published_at, duration_seconds")
-      .in("video_id", videoIds);
-
-    if (videosError) throw new Error(videosError.message);
-
-    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v]));
-
-    return aggregatedList.map((m) => {
-      const v = videoMap.get(m.video_id);
-      return {
-        video_id: m.video_id,
-        title: v?.title ?? "",
-        thumbnail_url: v?.thumbnail_url ?? "",
-        published_at: v?.published_at ?? "",
-        duration_seconds: v?.duration_seconds ?? 0,
-        views: m.views,
-        likes: m.likes,
-        comments: m.comments,
-        watch_time_hours: m.watch_time_hours,
-        avg_view_duration_seconds: m.avg_view_duration_seconds,
-        eng_rate: m.views > 0 ? ((m.likes + m.comments) / m.views) * 100 : 0,
-      };
-    });
   });
 
 // "Melhor Horário para Postar" analisa TODOS os vídeos já sincronizados do canal,
