@@ -59,16 +59,61 @@ serve(async (req) => {
 
     const accessToken = tokenData.access_token;
 
-    // 2. Page through commentThreads for the whole channel, once per moderation
-    //    status. "heldForReview" (awaiting the creator's explicit decision) and
-    //    "likelySpam" (auto-hidden by YouTube's own spam detection) are both
-    //    completely separate queues the default (published) listing never
-    //    includes — together they're what most creators mean by "comments
-    //    hidden automatically".
+    // 2. Page through commentThreads. "published" works fine channel-wide via
+    //    allThreadsRelatedToChannelId. "heldForReview" (awaiting the creator's
+    //    explicit decision) and "likelySpam" (auto-hidden by YouTube's own spam
+    //    detection) do NOT — combined with allThreadsRelatedToChannelId that
+    //    parameter silently comes back empty even when the channel visibly has
+    //    held comments in Studio (confirmed). Those two only work scoped to a
+    //    single videoId, so they're fetched per-video below instead.
     const commentRows: Array<Record<string, unknown>> = [];
     const replyRows: Array<Record<string, unknown>> = [];
 
-    const fetchThreads = async (moderationStatus: "published" | "heldForReview" | "likelySpam") => {
+    const ingestThreadItems = (items: any[], moderationStatus: string) => {
+      for (const item of items) {
+        const top = item.snippet?.topLevelComment?.snippet;
+        if (!top) continue;
+        const commentId = item.snippet.topLevelComment.id as string;
+
+        const inlineReplies = item.replies?.comments ?? [];
+        const hasOwnerReply = inlineReplies.some(
+          (r: any) => r.snippet?.authorChannelId?.value === channelId,
+        );
+
+        commentRows.push({
+          comment_id: commentId,
+          video_id: item.snippet.videoId,
+          author_display_name: top.authorDisplayName ?? null,
+          author_profile_image_url: top.authorProfileImageUrl ?? null,
+          author_channel_id: top.authorChannelId?.value ?? null,
+          text_display: top.textDisplay ?? "",
+          like_count: top.likeCount ?? 0,
+          total_reply_count: item.snippet.totalReplyCount ?? 0,
+          has_owner_reply: hasOwnerReply,
+          can_reply: item.snippet.canReply ?? true,
+          moderation_status: moderationStatus,
+          published_at: top.publishedAt ?? null,
+          synced_at: new Date().toISOString(),
+        });
+
+        for (const r of inlineReplies) {
+          const rSnippet = r.snippet;
+          if (!rSnippet) continue;
+          replyRows.push({
+            reply_id: r.id,
+            parent_comment_id: commentId,
+            author_display_name: rSnippet.authorDisplayName ?? null,
+            author_channel_id: rSnippet.authorChannelId?.value ?? null,
+            text_display: rSnippet.textDisplay ?? "",
+            is_owner: rSnippet.authorChannelId?.value === channelId,
+            published_at: rSnippet.publishedAt ?? null,
+            synced_at: new Date().toISOString(),
+          });
+        }
+      }
+    };
+
+    const fetchChannelThreads = async (moderationStatus: "published") => {
       let pageToken: string | undefined;
       let pagesFetched = 0;
 
@@ -96,56 +141,52 @@ serve(async (req) => {
           throw new Error(`commentThreads.list (${moderationStatus}) error: ${JSON.stringify(body)}`);
         }
 
-        for (const item of body.items ?? []) {
-          const top = item.snippet?.topLevelComment?.snippet;
-          if (!top) continue;
-          const commentId = item.snippet.topLevelComment.id as string;
-
-          const inlineReplies = item.replies?.comments ?? [];
-          const hasOwnerReply = inlineReplies.some(
-            (r: any) => r.snippet?.authorChannelId?.value === channelId,
-          );
-
-          commentRows.push({
-            comment_id: commentId,
-            video_id: item.snippet.videoId,
-            author_display_name: top.authorDisplayName ?? null,
-            author_profile_image_url: top.authorProfileImageUrl ?? null,
-            author_channel_id: top.authorChannelId?.value ?? null,
-            text_display: top.textDisplay ?? "",
-            like_count: top.likeCount ?? 0,
-            total_reply_count: item.snippet.totalReplyCount ?? 0,
-            has_owner_reply: hasOwnerReply,
-            can_reply: item.snippet.canReply ?? true,
-            moderation_status: moderationStatus,
-            published_at: top.publishedAt ?? null,
-            synced_at: new Date().toISOString(),
-          });
-
-          for (const r of inlineReplies) {
-            const rSnippet = r.snippet;
-            if (!rSnippet) continue;
-            replyRows.push({
-              reply_id: r.id,
-              parent_comment_id: commentId,
-              author_display_name: rSnippet.authorDisplayName ?? null,
-              author_channel_id: rSnippet.authorChannelId?.value ?? null,
-              text_display: rSnippet.textDisplay ?? "",
-              is_owner: rSnippet.authorChannelId?.value === channelId,
-              published_at: rSnippet.publishedAt ?? null,
-              synced_at: new Date().toISOString(),
-            });
-          }
-        }
+        ingestThreadItems(body.items ?? [], moderationStatus);
 
         pageToken = body.nextPageToken;
         pagesFetched++;
       } while (pageToken && pagesFetched < MAX_PAGES);
     };
 
-    await fetchThreads("published");
-    await fetchThreads("heldForReview");
-    await fetchThreads("likelySpam");
+    // heldForReview / likelySpam: one commentThreads.list call per video. Cheap
+    // per call (1 quota unit) but scales with catalog size, so run with limited
+    // concurrency rather than sequentially.
+    const fetchVideoThreads = async (videoId: string, moderationStatus: "heldForReview" | "likelySpam") => {
+      const url = new URL("https://www.googleapis.com/youtube/v3/commentThreads");
+      url.searchParams.set("part", "snippet,replies");
+      url.searchParams.set("videoId", videoId);
+      url.searchParams.set("maxResults", "100");
+      url.searchParams.set("textFormat", "plainText");
+      url.searchParams.set("moderationStatus", moderationStatus);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        if (res.status === 403 || res.status === 404) return; // comments disabled on this video
+        console.warn(`commentThreads.list (${moderationStatus}) error for ${videoId}:`, JSON.stringify(body));
+        return;
+      }
+      ingestThreadItems(body.items ?? [], moderationStatus);
+    };
+
+    await fetchChannelThreads("published");
+
+    const { data: allVideos, error: allVideosError } = await supabase.from("youtube_videos").select("video_id");
+    if (allVideosError) throw new Error(`Failed to list videos for moderation scan: ${allVideosError.message}`);
+    const videoIds = (allVideos ?? []).map((v: any) => v.video_id as string);
+
+    const CONCURRENCY = 10;
+    for (let i = 0; i < videoIds.length; i += CONCURRENCY) {
+      const batch = videoIds.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.flatMap((videoId) => [
+          fetchVideoThreads(videoId, "heldForReview"),
+          fetchVideoThreads(videoId, "likelySpam"),
+        ]),
+      );
+    }
 
     // 3. Upsert (chunked to stay well under request size limits)
     const chunk = <T,>(arr: T[], size: number) =>
