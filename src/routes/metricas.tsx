@@ -1464,7 +1464,9 @@ function MetricsPage() {
                 ))}
               </div>
               <p className="text-sm text-muted-foreground">
-                {commentsQuery.data?.length ?? 0} comentário{(commentsQuery.data?.length ?? 0) !== 1 ? "s" : ""}
+                {commentsQuery.data
+                  ? `${commentsQuery.data.unansweredCount} sem resposta de ${commentsQuery.data.totalCount} no total`
+                  : "…"}
               </p>
             </div>
 
@@ -1474,7 +1476,7 @@ function MetricsPage() {
                 <Skeleton className="h-[120px] w-full" />
                 <Skeleton className="h-[120px] w-full" />
               </div>
-            ) : (commentsQuery.data?.length ?? 0) === 0 ? (
+            ) : (commentsQuery.data?.comments.length ?? 0) === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed rounded-xl border-border bg-surface-1/50 my-8">
                 <MessageCircle className="size-12 text-muted-foreground/30 mb-4" />
                 <h3 className="text-xl font-semibold mb-2">
@@ -1486,7 +1488,7 @@ function MetricsPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {commentsQuery.data!.map((c) => {
+                {commentsQuery.data!.comments.map((c) => {
                   const isReplying = openReplyFor === c.comment_id;
                   const draft = replyDrafts[c.comment_id] ?? "";
                   return (

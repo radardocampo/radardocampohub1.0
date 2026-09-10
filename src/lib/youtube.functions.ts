@@ -513,11 +513,28 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
     return (goals ?? []) as GrowthGoal[];
   });
 
-/** Lê comentários já sincronizados (com respostas), mais recentes primeiro. */
+export type YoutubeCommentsResult = {
+  comments: YoutubeCommentRow[];
+  totalCount: number;
+  unansweredCount: number;
+};
+
+/**
+ * Lê comentários já sincronizados (com respostas), mais recentes primeiro.
+ * Retorna também totalCount/unansweredCount (contagens reais, sem o corte de
+ * .limit(200) da listagem) para deixar visível quando os dois filtros batem
+ * por coincidência dos dados — por exemplo, se o canal nunca respondeu nada
+ * ainda, "Não respondidos" e "Todos" são legitimamente o mesmo conjunto.
+ */
 export const getYoutubeComments = createServerFn({ method: "GET" })
   .inputValidator((data: { filter: "all" | "unanswered" }) => data)
-  .handler(async ({ data }): Promise<YoutubeCommentRow[]> => {
+  .handler(async ({ data }): Promise<YoutubeCommentsResult> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const [{ count: totalCount }, { count: unansweredCount }] = await Promise.all([
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }),
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("has_owner_reply", false),
+    ]);
 
     let query = supabaseAdmin
       .from("youtube_comments")
@@ -533,7 +550,9 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
 
     const { data: comments, error } = await query;
     if (error) throw new Error(error.message);
-    if (!comments || comments.length === 0) return [];
+    if (!comments || comments.length === 0) {
+      return { comments: [], totalCount: totalCount ?? 0, unansweredCount: unansweredCount ?? 0 };
+    }
 
     const commentIds = comments.map((c) => c.comment_id);
     const videoIds = [...new Set(comments.map((c) => c.video_id))];
@@ -561,7 +580,7 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
       repliesByComment.set(r.parent_comment_id, list);
     }
 
-    return comments.map((c) => {
+    const mapped = comments.map((c) => {
       const video = videoMap.get(c.video_id);
       return {
         comment_id: c.comment_id,
@@ -579,4 +598,6 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
         replies: repliesByComment.get(c.comment_id) ?? [],
       };
     });
+
+    return { comments: mapped, totalCount: totalCount ?? 0, unansweredCount: unansweredCount ?? 0 };
   });
