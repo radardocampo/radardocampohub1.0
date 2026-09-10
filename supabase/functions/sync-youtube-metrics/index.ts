@@ -65,6 +65,15 @@ serve(async (req) => {
     }
 
     const currentSubscribers = Number(channelData.items[0].statistics.subscriberCount || 0);
+    const currentTotalViews = Number(channelData.items[0].statistics.viewCount || 0);
+
+    // Snapshot the channel's lifetime view count (Data API, near-real-time, no
+    // Analytics processing lag) every run. Two snapshots straddling a gap in
+    // Analytics data let us estimate "views today" below instead of showing 0.
+    await supabase.from("youtube_channel_view_snapshots").insert({
+      captured_at: new Date().toISOString(),
+      total_views: currentTotalViews,
+    });
 
     // 3. YouTube Analytics API for the last 14 days
     const dailyData: Record<string, any> = {};
@@ -164,20 +173,50 @@ serve(async (req) => {
     let runningSubscribers = currentSubscribers;
 
     // YouTube Analytics has a well-known ~24-72h processing lag: the most recent
-    // 1-3 days in `allDates` often simply have no row in `dailyData` yet. This used
-    // to be "filled" by copying the last day that DID have data (views, watch time,
-    // everything) into every unprocessed day after it — so the last 2-3 days on the
-    // chart showed identical numbers, looking like a real (flat) trend instead of
-    // "not synced yet". Days without a real Analytics row are now zeroed out
-    // instead of duplicated; once YouTube finishes processing them, a later sync's
-    // upsert (onConflict platform_id,date) overwrites the zero with the real value.
-    // subscribersGained/Lost default to 0 for those days too, so runningSubscribers
-    // (reconstructed backward from the current live subscriber count) is simply
-    // held steady rather than nudged by fabricated deltas.
+    // 1-3 days in `allDates` (ordered today-first, going backward) often simply
+    // have no row in `dailyData` yet. This used to be "filled" by copying the
+    // last day that DID have data (views, watch time, everything) into every
+    // unprocessed day after it — so the chart showed identical numbers, looking
+    // like a real (flat) trend instead of "not synced yet".
+    //
+    // For TODAY specifically, when it's part of that unprocessed gap, we can do
+    // better than a bare 0: the Data API's channel view count (statistics.viewCount,
+    // no Analytics lag) already reflects views from videos published hours ago.
+    // Comparing it against a snapshot taken before the gap started gives an
+    // estimated "views today" — flagged via views_estimated so it's visibly
+    // provisional and gets overwritten with the real value once Analytics catches up.
+    // Earlier gap days (if the lag spans more than one day) and every other metric
+    // (watch time, AVD, likes — Analytics-only, no Data API equivalent) stay at 0;
+    // there's no near-real-time source to estimate those from.
+    let firstRealIndex = allDates.length;
+    for (let i = 0; i < allDates.length; i++) {
+      if (dailyData[allDates[i]]) {
+        firstRealIndex = i;
+        break;
+      }
+    }
+    const todayStr = allDates[0];
+    let estimatedViewsForToday: number | null = null;
+    if (firstRealIndex > 0 && !dailyData[todayStr]) {
+      const lastRealDate = firstRealIndex < allDates.length ? allDates[firstRealIndex] : startDateStr;
+      const { data: baselineRows } = await supabase
+        .from("youtube_channel_view_snapshots")
+        .select("total_views, captured_at")
+        .lte("captured_at", `${lastRealDate}T23:59:59.999Z`)
+        .order("captured_at", { ascending: false })
+        .limit(1);
+      const baseline = baselineRows?.[0];
+      if (baseline) {
+        const delta = currentTotalViews - Number(baseline.total_views);
+        if (delta > 0) estimatedViewsForToday = delta;
+      }
+    }
+
     for (const date of allDates) {
       const dataForDay = dailyData[date] ?? null;
+      const isEstimatedToday = date === todayStr && !dataForDay && estimatedViewsForToday !== null;
 
-      const views = dataForDay?.views ?? 0;
+      const views = dataForDay?.views ?? (isEstimatedToday ? estimatedViewsForToday! : 0);
       const likes = dataForDay?.likes ?? 0;
       const comments = dataForDay?.comments ?? 0;
       const shares = dataForDay?.shares ?? 0;
@@ -204,6 +243,7 @@ serve(async (req) => {
         estimated_revenue: estimatedRevenue,
         comments: comments,
         shares: shares,
+        views_estimated: isEstimatedToday,
         raw_data: dataForDay?.raw ? { analytics_row: dataForDay.raw } : null,
         synced_at: new Date().toISOString(),
       });

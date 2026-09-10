@@ -332,6 +332,7 @@ function MetricsPage() {
         subs_gained: row.subs_gained || 0,
         subs_lost: row.subs_lost || 0,
         synced_at: row.synced_at,
+        views_estimated: row.views_estimated || false,
       } as MetricPoint & {
         comments: number;
         shares: number;
@@ -340,6 +341,7 @@ function MetricsPage() {
         subs_gained: number;
         subs_lost: number;
         synced_at?: string;
+        views_estimated?: boolean;
       };
     });
 
@@ -549,8 +551,13 @@ function MetricsPage() {
     return (
       <div className="mt-8 grid gap-8 lg:grid-cols-2">
         <div className="h-[340px]">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Views por dia
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            {seriesData[seriesData.length - 1]?.views_estimated
+              ? "O último dia ainda não foi processado pelo YouTube Analytics — o número mostrado é uma estimativa baseada nas views totais do canal, e será substituído pelo valor real na próxima sincronização."
+              : " "}
           </p>
           <ResponsiveContainer width="100%" height="90%">
             <AreaChart data={seriesData}>

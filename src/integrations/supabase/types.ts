@@ -179,6 +179,7 @@ export type Database = {
           subs_lost: number | null
           synced_at: string
           views: number
+          views_estimated: boolean
           watch_time_hours: number | null
         }
         Insert: {
@@ -197,6 +198,7 @@ export type Database = {
           subs_lost?: number | null
           synced_at?: string
           views?: number
+          views_estimated?: boolean
           watch_time_hours?: number | null
         }
         Update: {
@@ -215,6 +217,7 @@ export type Database = {
           subs_lost?: number | null
           synced_at?: string
           views?: number
+          views_estimated?: boolean
           watch_time_hours?: number | null
         }
         Relationships: [
@@ -501,6 +504,24 @@ export type Database = {
           synced_at?: string
           traffic_source_type?: string
           views?: number
+        }
+        Relationships: []
+      }
+      youtube_channel_view_snapshots: {
+        Row: {
+          captured_at: string
+          id: number
+          total_views: number
+        }
+        Insert: {
+          captured_at?: string
+          id?: number
+          total_views: number
+        }
+        Update: {
+          captured_at?: string
+          id?: number
+          total_views?: number
         }
         Relationships: []
       }

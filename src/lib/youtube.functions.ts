@@ -14,6 +14,7 @@ export type YoutubeDailyRow = {
   comments?: number;
   shares?: number;
   synced_at?: string;
+  views_estimated?: boolean;
 };
 
 export type YoutubeAudienceRow = {
@@ -83,7 +84,7 @@ export const getYoutubeMetrics = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let query = supabaseAdmin
       .from("metrics_daily")
-      .select("date, followers, views, likes, engagement_rate, watch_time_hours, avd_seconds, subs_gained, subs_lost, estimated_revenue, comments, shares, synced_at")
+      .select("date, followers, views, likes, engagement_rate, watch_time_hours, avd_seconds, subs_gained, subs_lost, estimated_revenue, comments, shares, synced_at, views_estimated")
       .eq("platform_id", "youtube")
       .order("date", { ascending: true });
 
@@ -110,6 +111,7 @@ export const getYoutubeMetrics = createServerFn({ method: "GET" })
       comments: r.comments ? Number(r.comments) : 0,
       shares: r.shares ? Number(r.shares) : 0,
       synced_at: r.synced_at,
+      views_estimated: !!(r as { views_estimated?: boolean }).views_estimated,
     }));
   });
 
@@ -297,20 +299,22 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
       if (videosError) throw new Error(videosError.message);
       if (!videos || videos.length === 0) return [];
 
-      // Same explicit-limit fix as the days!==null branch below: with full
-      // per-video history now synced (not just a 90-day trailing window), this
-      // can comfortably exceed the default row cap if left unbounded.
-      const { data: dailyMetrics, error: dailyError } = await (supabaseAdmin as any)
-        .from("youtube_video_metrics_daily")
-        .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
-        .limit(50000) as {
-        data: Array<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
-        error: { message: string } | null;
-      };
-      if (dailyError) throw new Error(dailyError.message);
+      // Paginated (see fetchAllRows): with full per-video history now synced
+      // (not just a 90-day trailing window), this table comfortably exceeds
+      // this project's 1000-row PostgREST response cap, which no `.limit()`
+      // can raise — a single unbounded/high-limit select silently came back
+      // truncated to an arbitrary ~1000 rows covering a handful of videos.
+      const dailyMetrics = await fetchAllRows<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
+        (rangeFrom, rangeTo) =>
+          (supabaseAdmin as any)
+            .from("youtube_video_metrics_daily")
+            .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
+            .order("id", { ascending: true })
+            .range(rangeFrom, rangeTo),
+      );
 
       const watchTimeMap = new Map<string, { watch_time: number; avd_weighted_sum: number; views: number }>();
-      for (const m of dailyMetrics ?? []) {
+      for (const m of dailyMetrics) {
         const curr = watchTimeMap.get(m.video_id) ?? { watch_time: 0, avd_weighted_sum: 0, views: 0 };
         const dailyViews = Number(m.views);
         curr.watch_time += Number(m.watch_time_hours ?? 0);
@@ -344,21 +348,22 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
 
     const from = new Date();
     from.setDate(from.getDate() - data.days);
-    // Explicit generous limit: without it, Postgres/PostgREST's default row cap
-    // silently truncated wider windows (e.g. 90 dias, easily 10k+ rows across the
-    // whole catalog) to an arbitrary subset of rows — fewer distinct videos than
-    // a narrower window that fit under the cap, i.e. the count went backwards as
-    // the period grew instead of only growing.
-    const { data: metrics, error: metricsError } = await (supabaseAdmin as any)
-      .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds")
-      .gte("date", from.toISOString().slice(0, 10))
-      .limit(50000) as {
-      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
-      error: { message: string } | null;
-    };
-    if (metricsError) throw new Error(metricsError.message);
-    if (!metrics || metrics.length === 0) return [];
+    const fromDateStr = from.toISOString().slice(0, 10);
+    // Paginated (see fetchAllRows): wider windows (e.g. 90 dias) easily exceed
+    // this project's 1000-row PostgREST response cap across the whole catalog,
+    // and no `.limit()` value raises that cap — it silently truncated to an
+    // arbitrary subset of rows, so the video count went backwards as the
+    // period grew instead of only growing.
+    const metrics = await fetchAllRows<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
+      (rangeFrom, rangeTo) =>
+        (supabaseAdmin as any)
+          .from("youtube_video_metrics_daily")
+          .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds")
+          .gte("date", fromDateStr)
+          .order("id", { ascending: true })
+          .range(rangeFrom, rangeTo),
+    );
+    if (metrics.length === 0) return [];
 
     const map = new Map<string, { views: number; likes: number; comments: number; watch_time: number; avd_weighted_sum: number; count: number }>();
     for (const m of metrics) {
@@ -690,6 +695,33 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
       pendingCount: pendingCount ?? 0,
     };
   });
+
+/**
+ * Supabase/PostgREST projects cap every REST response at a fixed row count
+ * (this project's is 1000) regardless of what `.limit()` the client asks
+ * for — confirmed by calling the real query through a service-role client
+ * and seeing exactly 1000 rows come back covering only 13 of 131 videos,
+ * even with `.limit(50000)` requested. A single `.limit()` can never be
+ * "big enough"; the only correct fix is to page through with `.range()`
+ * until a page comes back short. `.order("id")` just keeps each page
+ * disjoint and total — the id itself carries no business meaning here.
+ */
+async function fetchAllRows<T>(
+  buildPage: (rangeFrom: number, rangeTo: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const results: T[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await buildPage(offset, offset + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+    results.push(...data);
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return results;
+}
 
 export type ModerateCommentInput = {
   comment_id: string;
