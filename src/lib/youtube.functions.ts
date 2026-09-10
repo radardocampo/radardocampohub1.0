@@ -47,6 +47,30 @@ export type YoutubeVideoRow = {
   eng_rate?: number;
 };
 
+export type YoutubeCommentReplyRow = {
+  reply_id: string;
+  author_display_name: string;
+  text_display: string;
+  is_owner: boolean;
+  published_at: string;
+};
+
+export type YoutubeCommentRow = {
+  comment_id: string;
+  video_id: string;
+  video_title: string;
+  video_thumbnail_url: string;
+  author_display_name: string;
+  author_profile_image_url: string;
+  text_display: string;
+  like_count: number;
+  total_reply_count: number;
+  has_owner_reply: boolean;
+  can_reply: boolean;
+  published_at: string;
+  replies: YoutubeCommentReplyRow[];
+};
+
 /** Lê as métricas diárias reais do YouTube já salvas no banco. */
 export const getYoutubeMetrics = createServerFn({ method: "GET" })
   .inputValidator((data: { days: number | null }) => ({
@@ -487,4 +511,72 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
       throw new Error(msg);
     }
     return (goals ?? []) as GrowthGoal[];
+  });
+
+/** Lê comentários já sincronizados (com respostas), mais recentes primeiro. */
+export const getYoutubeComments = createServerFn({ method: "GET" })
+  .inputValidator((data: { filter: "all" | "unanswered" }) => data)
+  .handler(async ({ data }): Promise<YoutubeCommentRow[]> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    let query = supabaseAdmin
+      .from("youtube_comments")
+      .select(
+        "comment_id, video_id, author_display_name, author_profile_image_url, text_display, like_count, total_reply_count, has_owner_reply, can_reply, published_at",
+      )
+      .order("published_at", { ascending: false })
+      .limit(200);
+
+    if (data.filter === "unanswered") {
+      query = query.eq("has_owner_reply", false);
+    }
+
+    const { data: comments, error } = await query;
+    if (error) throw new Error(error.message);
+    if (!comments || comments.length === 0) return [];
+
+    const commentIds = comments.map((c) => c.comment_id);
+    const videoIds = [...new Set(comments.map((c) => c.video_id))];
+
+    const [{ data: videos }, { data: replies }] = await Promise.all([
+      supabaseAdmin.from("youtube_videos").select("video_id, title, thumbnail_url").in("video_id", videoIds),
+      supabaseAdmin
+        .from("youtube_comment_replies")
+        .select("reply_id, parent_comment_id, author_display_name, text_display, is_owner, published_at")
+        .in("parent_comment_id", commentIds)
+        .order("published_at", { ascending: true }),
+    ]);
+
+    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v]));
+    const repliesByComment = new Map<string, YoutubeCommentReplyRow[]>();
+    for (const r of replies ?? []) {
+      const list = repliesByComment.get(r.parent_comment_id) ?? [];
+      list.push({
+        reply_id: r.reply_id,
+        author_display_name: r.author_display_name ?? "",
+        text_display: r.text_display ?? "",
+        is_owner: r.is_owner,
+        published_at: r.published_at ?? "",
+      });
+      repliesByComment.set(r.parent_comment_id, list);
+    }
+
+    return comments.map((c) => {
+      const video = videoMap.get(c.video_id);
+      return {
+        comment_id: c.comment_id,
+        video_id: c.video_id,
+        video_title: video?.title ?? "(vídeo fora do cache local)",
+        video_thumbnail_url: video?.thumbnail_url ?? "",
+        author_display_name: c.author_display_name ?? "",
+        author_profile_image_url: c.author_profile_image_url ?? "",
+        text_display: c.text_display ?? "",
+        like_count: Number(c.like_count),
+        total_reply_count: Number(c.total_reply_count),
+        has_owner_reply: c.has_owner_reply,
+        can_reply: c.can_reply,
+        published_at: c.published_at ?? "",
+        replies: repliesByComment.get(c.comment_id) ?? [],
+      };
+    });
   });

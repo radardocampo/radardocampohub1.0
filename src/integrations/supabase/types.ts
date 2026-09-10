@@ -358,6 +358,98 @@ export type Database = {
         }
         Relationships: []
       }
+      youtube_comment_replies: {
+        Row: {
+          author_channel_id: string | null
+          author_display_name: string | null
+          is_owner: boolean
+          parent_comment_id: string
+          published_at: string | null
+          reply_id: string
+          synced_at: string
+          text_display: string | null
+          updated_at: string
+        }
+        Insert: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          is_owner?: boolean
+          parent_comment_id: string
+          published_at?: string | null
+          reply_id: string
+          synced_at?: string
+          text_display?: string | null
+          updated_at?: string
+        }
+        Update: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          is_owner?: boolean
+          parent_comment_id?: string
+          published_at?: string | null
+          reply_id?: string
+          synced_at?: string
+          text_display?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "youtube_comment_replies_parent_comment_id_fkey"
+            columns: ["parent_comment_id"]
+            isOneToOne: false
+            referencedRelation: "youtube_comments"
+            referencedColumns: ["comment_id"]
+          },
+        ]
+      }
+      youtube_comments: {
+        Row: {
+          author_channel_id: string | null
+          author_display_name: string | null
+          author_profile_image_url: string | null
+          can_reply: boolean
+          comment_id: string
+          has_owner_reply: boolean
+          like_count: number
+          published_at: string | null
+          synced_at: string
+          text_display: string | null
+          total_reply_count: number
+          updated_at: string
+          video_id: string
+        }
+        Insert: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          author_profile_image_url?: string | null
+          can_reply?: boolean
+          comment_id: string
+          has_owner_reply?: boolean
+          like_count?: number
+          published_at?: string | null
+          synced_at?: string
+          text_display?: string | null
+          total_reply_count?: number
+          updated_at?: string
+          video_id: string
+        }
+        Update: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          author_profile_image_url?: string | null
+          can_reply?: boolean
+          comment_id?: string
+          has_owner_reply?: boolean
+          like_count?: number
+          published_at?: string | null
+          synced_at?: string
+          text_display?: string | null
+          total_reply_count?: number
+          updated_at?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
       youtube_geography_daily: {
         Row: {
           country_code: string

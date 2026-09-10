@@ -18,7 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { RefreshCw, Video } from "lucide-react";
+import { RefreshCw, Video, MessageCircle, Send } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -37,12 +37,15 @@ import {
   getYoutubeBestPostingTime,
   getLatestSyncLog,
   getPlatformGoals,
+  getYoutubeComments,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
 
 const RANGES = [
   { days: 7, label: "Últimos 7 dias" },
@@ -130,6 +133,9 @@ function MetricsPage() {
   const [activeTab, setActiveTab] = useState("geral");
   const [videoFilter, setVideoFilter] = useState<"all" | "shorts" | "long">("all");
   const [videoSort, setVideoSort] = useState<{ key: keyof YoutubeVideoRow; desc: boolean }>({ key: "views", desc: true });
+  const [commentFilter, setCommentFilter] = useState<"all" | "unanswered">("unanswered");
+  const [openReplyFor, setOpenReplyFor] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
 
   const fetchYoutube = useServerFn(getYoutubeMetrics);
@@ -142,6 +148,7 @@ function MetricsPage() {
   const fetchBestTime = useServerFn(getYoutubeBestPostingTime);
   const fetchLatestSync = useServerFn(getLatestSyncLog);
   const fetchPlatformGoals = useServerFn(getPlatformGoals);
+  const fetchComments = useServerFn(getYoutubeComments);
 
   const currentMonth = new Date().toISOString().slice(0, 7);
   const goalsQuery = useQuery({
@@ -202,6 +209,12 @@ function MetricsPage() {
   const bestTimeQuery = useQuery({
     queryKey: ["youtube-best-time"],
     queryFn: () => fetchBestTime(),
+    enabled: selected === "youtube",
+  });
+
+  const commentsQuery = useQuery({
+    queryKey: ["youtube-comments", commentFilter],
+    queryFn: () => fetchComments({ data: { filter: commentFilter } }),
     enabled: selected === "youtube",
   });
 
@@ -266,47 +279,84 @@ function MetricsPage() {
     },
   });
 
-  // --- Sync mutation: audience + videos (new button) ---
+  // --- Sync mutation: audience + videos + comments (one button, three edge functions) ---
   const syncAudienceVideosMutation = useMutation({
     mutationFn: async () => {
-      // Call audience sync
-      const { error: err1, data: d1 } = await supabase.functions.invoke("sync-youtube-audience", { method: "POST" });
-      if (err1) {
-        let detail = err1.message;
-        const response = (err1 as { context?: Response }).context;
-        if (response && typeof response.json === "function") {
-          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+      const invoke = async (fn: string, label: string) => {
+        const { error, data } = await supabase.functions.invoke(fn, { method: "POST" });
+        if (error) {
+          let detail = error.message;
+          const response = (error as { context?: Response }).context;
+          if (response && typeof response.json === "function") {
+            try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+          }
+          throw new Error(`${label}: ${detail}`);
         }
-        throw new Error(`Audiência: ${detail}`);
-      }
+        return data;
+      };
 
-      // Call videos sync
-      const { error: err2, data: d2 } = await supabase.functions.invoke("sync-youtube-videos", { method: "POST" });
-      if (err2) {
-        let detail = err2.message;
-        const response = (err2 as { context?: Response }).context;
-        if (response && typeof response.json === "function") {
-          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
-        }
-        throw new Error(`Vídeos: ${detail}`);
-      }
+      const audience = await invoke("sync-youtube-audience", "Audiência");
+      const videos = await invoke("sync-youtube-videos", "Vídeos");
+      const comments = await invoke("sync-youtube-comments", "Comentários");
 
-      return { audience: d1, videos: d2 };
+      return { audience, videos, comments };
     },
     onMutate: () => {
-      toast.info("Sincronizando audiência e vídeos...", { id: "sync-audience-videos" });
+      toast.info("Sincronizando audiência, vídeos e comentários...", { id: "sync-audience-videos" });
     },
     onSuccess: async () => {
-      toast.success("Audiência e vídeos sincronizados!", { id: "sync-audience-videos" });
+      toast.success("Audiência, vídeos e comentários sincronizados!", { id: "sync-audience-videos" });
       await queryClient.invalidateQueries({ queryKey: ["youtube-audience"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-geography"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-traffic"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-videos"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-best-time"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-comments"] });
       await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast.error(`Falha: ${message}`, { id: "sync-audience-videos", duration: 8000 });
+    },
+  });
+
+  // --- Reply mutation: posts a reply to a top-level comment (the only YouTube-write
+  //     action in the comments panel — see CLAUDE.md for why there's no delete/moderate). ---
+  const replyMutation = useMutation({
+    mutationFn: async ({ commentId, text }: { commentId: string; text: string }) => {
+      const { error, data } = await supabase.functions.invoke("reply-youtube-comment", {
+        method: "POST",
+        body: { comment_id: commentId, text },
+      });
+      if (error) {
+        let detail = error.message;
+        const response = (error as { context?: Response }).context;
+        if (response && typeof response.json === "function") {
+          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+        }
+        throw new Error(detail);
+      }
+      if (data && typeof data === "object" && "error" in data && data.error) {
+        throw new Error(String((data as { error: unknown }).error));
+      }
+      return { commentId, data };
+    },
+    onMutate: () => {
+      toast.info("Publicando resposta...", { id: "reply-comment" });
+    },
+    onSuccess: async ({ commentId }) => {
+      toast.success("Resposta publicada!", { id: "reply-comment" });
+      setReplyDrafts((prev) => {
+        const next = { ...prev };
+        delete next[commentId];
+        return next;
+      });
+      setOpenReplyFor(null);
+      await queryClient.invalidateQueries({ queryKey: ["youtube-comments"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast.error(`Falha ao responder: ${message}`, { id: "reply-comment", duration: 8000 });
     },
   });
 
@@ -683,7 +733,7 @@ function MetricsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs">
-                    Atualiza os dados demográficos e vídeos (últimos 90 dias) do YouTube.
+                    Atualiza dados demográficos, vídeos (últimos 90 dias) e comentários do YouTube.
                   </TooltipContent>
                 </UITooltip>
 
@@ -784,11 +834,12 @@ function MetricsPage() {
 
       {isYoutube ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">
-          <TabsList className="mb-8 grid w-full max-w-[640px] grid-cols-4">
+          <TabsList className="mb-8 grid w-full max-w-[800px] grid-cols-5">
             <TabsTrigger value="geral">Visão Geral</TabsTrigger>
             <TabsTrigger value="retencao">Retenção</TabsTrigger>
             <TabsTrigger value="audiencia">Audiência</TabsTrigger>
             <TabsTrigger value="videos">Vídeos</TabsTrigger>
+            <TabsTrigger value="comentarios">Comentários</TabsTrigger>
           </TabsList>
           
           {/* ============================================================
@@ -1392,6 +1443,138 @@ function MetricsPage() {
               </div>
             </>
           )}
+          </TabsContent>
+
+          {/* ============================================================
+              TAB: COMENTÁRIOS
+              ============================================================ */}
+          <TabsContent value="comentarios">
+            <div className="flex flex-wrap items-center gap-3 mb-6">
+              <div className="flex gap-1 rounded-lg bg-secondary p-1">
+                {(["unanswered", "all"] as const).map((f) => (
+                  <Button
+                    key={f}
+                    size="sm"
+                    variant={commentFilter === f ? "default" : "ghost"}
+                    onClick={() => setCommentFilter(f)}
+                    className="px-4 text-sm font-medium"
+                  >
+                    {f === "unanswered" ? "Não respondidos" : "Todos"}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {commentsQuery.data?.length ?? 0} comentário{(commentsQuery.data?.length ?? 0) !== 1 ? "s" : ""}
+              </p>
+            </div>
+
+            {commentsQuery.isLoading ? (
+              <div className="space-y-4 mt-8">
+                <Skeleton className="h-[120px] w-full" />
+                <Skeleton className="h-[120px] w-full" />
+                <Skeleton className="h-[120px] w-full" />
+              </div>
+            ) : (commentsQuery.data?.length ?? 0) === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed rounded-xl border-border bg-surface-1/50 my-8">
+                <MessageCircle className="size-12 text-muted-foreground/30 mb-4" />
+                <h3 className="text-xl font-semibold mb-2">
+                  {commentFilter === "unanswered" ? "Nenhum comentário pendente" : "Nenhum comentário encontrado"}
+                </h3>
+                <p className="text-muted-foreground max-w-sm">
+                  Clique em "Sincronizar Audiência e Vídeos" para buscar os comentários mais recentes do canal.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {commentsQuery.data!.map((c) => {
+                  const isReplying = openReplyFor === c.comment_id;
+                  const draft = replyDrafts[c.comment_id] ?? "";
+                  return (
+                    <article key={c.comment_id} className="panel p-5">
+                      <div className="flex items-start gap-3">
+                        <Avatar className="size-9 flex-shrink-0">
+                          <AvatarImage src={c.author_profile_image_url} alt="" />
+                          <AvatarFallback>{(c.author_display_name || "?").slice(0, 1).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{c.author_display_name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {c.published_at ? new Date(c.published_at).toLocaleDateString("pt-BR") : ""}
+                            </span>
+                            {c.has_owner_reply && (
+                              <span className="text-xs bg-success/10 text-success px-2 py-0.5 rounded-full font-medium">
+                                Respondido
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm truncate max-w-[280px] text-muted-foreground" title={c.video_title}>
+                            em: {c.video_title}
+                          </p>
+                          <p className="mt-2 text-base whitespace-pre-wrap break-words">{c.text_display}</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{formatNumber(c.like_count)} curtidas</p>
+
+                          {c.replies.length > 0 && (
+                            <div className="mt-3 space-y-2 border-l-2 border-border/50 pl-4">
+                              {c.replies.map((r) => (
+                                <div key={r.reply_id}>
+                                  <span className="text-sm font-medium">
+                                    {r.author_display_name}{" "}
+                                    {r.is_owner && <span className="text-xs text-primary">(você)</span>}
+                                  </span>
+                                  <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                                    {r.text_display}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {c.can_reply &&
+                            (isReplying ? (
+                              <div className="mt-3 flex flex-col gap-2">
+                                <Textarea
+                                  value={draft}
+                                  onChange={(e) =>
+                                    setReplyDrafts((prev) => ({ ...prev, [c.comment_id]: e.target.value }))
+                                  }
+                                  placeholder="Escreva sua resposta..."
+                                  className="text-sm"
+                                  rows={2}
+                                />
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    disabled={!draft.trim() || replyMutation.isPending}
+                                    onClick={() =>
+                                      replyMutation.mutate({ commentId: c.comment_id, text: draft.trim() })
+                                    }
+                                  >
+                                    <Send className="mr-2 size-3.5" />
+                                    Enviar
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setOpenReplyFor(null)}>
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mt-3"
+                                onClick={() => setOpenReplyFor(c.comment_id)}
+                              >
+                                Responder
+                              </Button>
+                            ))}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       ) : (
