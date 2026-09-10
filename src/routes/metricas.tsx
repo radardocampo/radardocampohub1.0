@@ -197,9 +197,11 @@ function MetricsPage() {
     enabled: selected === "youtube",
   });
 
+  // Não depende de "days": analisa todo o histórico de vídeos sincronizado, não só o
+  // período selecionado no topo da página (ver nota em getYoutubeBestPostingTime).
   const bestTimeQuery = useQuery({
-    queryKey: ["youtube-best-time", days],
-    queryFn: () => fetchBestTime({ data: { days } }),
+    queryKey: ["youtube-best-time"],
+    queryFn: () => fetchBestTime(),
     enabled: selected === "youtube",
   });
 
@@ -1042,7 +1044,7 @@ function MetricsPage() {
                       />
                       <Tooltip
                         contentStyle={tooltipStyle}
-                        formatter={(value: number, name: string) => [formatFull(value), name === 'subs_gained' ? "Ganhos" : "Perdidos"]}
+                        formatter={(value: number, name: string) => [formatFull(value), name]}
                       />
                       <Area
                         type="monotone"

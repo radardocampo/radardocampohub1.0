@@ -316,27 +316,17 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     });
   });
 
+// "Melhor Horário para Postar" analisa o histórico inteiro de métricas por vídeo já
+// sincronizado, independente do seletor de período (7/30/90 dias) do topo da página.
+// Filtrar por esse período cortava a maioria dos vídeos fora da conta, deixando quase
+// todos os blocos de horário com menos de 3 vídeos (o mínimo exigido) e a sugestão
+// baseada em pouquíssimos dados.
 export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }) => {
-    // Calling the function directly inside server scope requires re-importing dependencies if they were strictly encapsulated,
-    // but we can just do the work. We'll reuse the logic we just defined.
-    // Instead of calling getYoutubeTopVideos which is wrapped by createServerFn, we'll fetch from db directly here
-    // or just fetch all videos and metrics.
+  .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let metricsQuery = (supabaseAdmin as any)
+    const { data: metrics, error: metricsError } = await (supabaseAdmin as any)
       .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, avg_view_duration_seconds") as any;
-      
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
-    }
-    
-    const { data: metrics, error: metricsError } = (await metricsQuery) as {
+      .select("video_id, date, views, avg_view_duration_seconds") as {
       data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
       error: { message: string } | null;
     };
