@@ -132,6 +132,36 @@ export type Database = {
           },
         ]
       }
+      growth_goals: {
+        Row: {
+          created_at: string
+          id: string
+          metric: string
+          period: string
+          platform_id: string
+          target_value: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric: string
+          period: string
+          platform_id: string
+          target_value: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric?: string
+          period?: string
+          platform_id?: string
+          target_value?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       metrics_daily: {
         Row: {
           avd_seconds: number | null
@@ -387,6 +417,7 @@ export type Database = {
           date: string
           id: string
           likes: number | null
+          synced_at: string
           updated_at: string
           video_id: string
           views: number | null
@@ -399,6 +430,7 @@ export type Database = {
           date: string
           id?: string
           likes?: number | null
+          synced_at?: string
           updated_at?: string
           video_id: string
           views?: number | null
@@ -411,6 +443,7 @@ export type Database = {
           date?: string
           id?: string
           likes?: number | null
+          synced_at?: string
           updated_at?: string
           video_id?: string
           views?: number | null

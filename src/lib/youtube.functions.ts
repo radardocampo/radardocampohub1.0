@@ -142,119 +142,100 @@ export const checkYoutubeHistoryExists = createServerFn({ method: "GET" })
     return !!row;
   });
 
-/** Lê dados de audiência demográfica (idade × gênero). */
+/**
+ * Lê dados de audiência demográfica (idade × gênero).
+ *
+ * Cada linha em `youtube_audience_daily` já é uma fotografia agregada de uma
+ * janela fixa de 90 dias (definida pela edge function sync-youtube-audience),
+ * marcada com a data em que a sincronização rodou — não uma métrica por dia.
+ * Por isso lemos apenas o snapshot mais recente, em vez de somar/tirar média
+ * de várias janelas de 90 dias sobrepostas (o que não teria significado
+ * estatístico e ignoraria o parâmetro de período da UI de qualquer forma).
+ */
 export const getYoutubeAudience = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeAudienceRow[]> => {
+  .handler(async (): Promise<YoutubeAudienceRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_audience_daily")
-      .select("date, age_group, gender, viewer_percentage");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_audience_daily")
+      .select("age_group, gender, viewer_percentage")
+      .eq("date", latest.date);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, { sum: number; count: number }>();
-    for (const r of (rows ?? [])) {
-      const key = `${r.age_group}_${r.gender}`;
-      const curr = map.get(key) ?? { sum: 0, count: 0 };
-      curr.sum += Number(r.viewer_percentage);
-      curr.count += 1;
-      map.set(key, curr);
-    }
-
-    const aggregated: YoutubeAudienceRow[] = [];
-    for (const [key, val] of map.entries()) {
-      const [age_group, gender] = key.split("_");
-      aggregated.push({
-        age_group: age_group!,
-        gender: gender!,
-        viewer_percentage: Number((val.sum / val.count).toFixed(3)),
-      });
-    }
-
-    return aggregated;
+    return (rows ?? []).map((r) => ({
+      age_group: r.age_group,
+      gender: r.gender,
+      viewer_percentage: Number(r.viewer_percentage),
+    }));
   });
 
-/** Lê dados geográficos (top países por views). */
+/**
+ * Lê dados geográficos (top países por views).
+ * Ver nota em `getYoutubeAudience`: lê apenas o snapshot mais recente de 90 dias.
+ */
 export const getYoutubeGeography = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeGeographyRow[]> => {
+  .handler(async (): Promise<YoutubeGeographyRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_geography_daily")
-      .select("date, country_code, views, watch_time_minutes");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_geography_daily")
+      .select("country_code, views, watch_time_minutes")
+      .eq("date", latest.date)
+      .order("views", { ascending: false })
+      .limit(10);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, { views: number; watch_time: number }>();
-    for (const r of (rows ?? [])) {
-      const curr = map.get(r.country_code) ?? { views: 0, watch_time: 0 };
-      curr.views += Number(r.views);
-      curr.watch_time += Number(r.watch_time_minutes);
-      map.set(r.country_code, curr);
-    }
-
-    const aggregated: YoutubeGeographyRow[] = [];
-    for (const [code, val] of map.entries()) {
-      aggregated.push({
-        country_code: code,
-        views: val.views,
-        watch_time_minutes: val.watch_time,
-      });
-    }
-
-    return aggregated.sort((a, b) => b.views - a.views).slice(0, 10);
+    return (rows ?? []).map((r) => ({
+      country_code: r.country_code,
+      views: Number(r.views),
+      watch_time_minutes: Number(r.watch_time_minutes),
+    }));
   });
 
-/** Lê dados de origens de tráfego. */
+/**
+ * Lê dados de origens de tráfego.
+ * Ver nota em `getYoutubeAudience`: lê apenas o snapshot mais recente de 90 dias.
+ */
 export const getYoutubeTrafficSources = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeTrafficSourceRow[]> => {
+  .handler(async (): Promise<YoutubeTrafficSourceRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_traffic_sources_daily")
-      .select("date, traffic_source_type, views");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_traffic_sources_daily")
+      .select("traffic_source_type, views")
+      .eq("date", latest.date)
+      .order("views", { ascending: false })
+      .limit(20);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, number>();
-    for (const r of (rows ?? [])) {
-      map.set(r.traffic_source_type, (map.get(r.traffic_source_type) ?? 0) + Number(r.views));
-    }
-
-    const aggregated: YoutubeTrafficSourceRow[] = [];
-    for (const [type, views] of map.entries()) {
-      aggregated.push({ traffic_source_type: type, views });
-    }
-
-    return aggregated.sort((a, b) => b.views - a.views).slice(0, 20);
+    return (rows ?? []).map((r) => ({
+      traffic_source_type: r.traffic_source_type,
+      views: Number(r.views),
+    }));
   });
 
 /** Lê ranking de vídeos com métricas (join youtube_videos + youtube_video_metrics_daily). */
@@ -503,7 +484,7 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
   .validator((data: { platform_id: string; period: string }) => data)
   .handler(async ({ data }): Promise<GrowthGoal[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: goals, error } = await (supabaseAdmin as any)
+    const { data: goals, error } = await supabaseAdmin
       .from("growth_goals")
       .select("platform_id, metric, target_value, period")
       .eq("platform_id", data.platform_id)
