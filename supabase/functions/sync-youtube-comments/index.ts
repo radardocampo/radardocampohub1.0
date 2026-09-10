@@ -60,13 +60,15 @@ serve(async (req) => {
     const accessToken = tokenData.access_token;
 
     // 2. Page through commentThreads for the whole channel, once per moderation
-    //    status. "heldForReview" is a completely separate queue that the default
-    //    (published) listing never includes — it's what lets the panel show
-    //    comments still awaiting the creator's approval.
+    //    status. "heldForReview" (awaiting the creator's explicit decision) and
+    //    "likelySpam" (auto-hidden by YouTube's own spam detection) are both
+    //    completely separate queues the default (published) listing never
+    //    includes — together they're what most creators mean by "comments
+    //    hidden automatically".
     const commentRows: Array<Record<string, unknown>> = [];
     const replyRows: Array<Record<string, unknown>> = [];
 
-    const fetchThreads = async (moderationStatus: "published" | "heldForReview") => {
+    const fetchThreads = async (moderationStatus: "published" | "heldForReview" | "likelySpam") => {
       let pageToken: string | undefined;
       let pagesFetched = 0;
 
@@ -143,6 +145,7 @@ serve(async (req) => {
 
     await fetchThreads("published");
     await fetchThreads("heldForReview");
+    await fetchThreads("likelySpam");
 
     // 3. Upsert (chunked to stay well under request size limits)
     const chunk = <T,>(arr: T[], size: number) =>
@@ -158,15 +161,16 @@ serve(async (req) => {
     }
 
     const heldCount = commentRows.filter((c) => c.moderation_status === "heldForReview").length;
+    const spamCount = commentRows.filter((c) => c.moderation_status === "likelySpam").length;
     await supabase.from("sync_logs").insert({
       platform_id: "youtube",
       status: "success",
-      message: `[comments] threads=${commentRows.length} (held=${heldCount}), replies=${replyRows.length}`,
+      message: `[comments] threads=${commentRows.length} (held=${heldCount}, likelySpam=${spamCount}), replies=${replyRows.length}`,
       run_at: new Date().toISOString(),
     });
 
     return new Response(
-      JSON.stringify({ success: true, threads: commentRows.length, held: heldCount, replies: replyRows.length }),
+      JSON.stringify({ success: true, threads: commentRows.length, held: heldCount, likelySpam: spamCount, replies: replyRows.length }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error: unknown) {

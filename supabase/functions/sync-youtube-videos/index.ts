@@ -77,14 +77,16 @@ serve(async (req) => {
     }
     const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
 
-    // 3. List recent videos (last 90 days, max 50 per execution)
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
+    // 3. List EVERY video ever uploaded to the channel (no date cutoff) — earlier
+    //    versions stopped after 90 days / 50 videos, which meant a channel with more
+    //    history than that (e.g. 134 videos here) only ever had its most recent slice
+    //    synced, and anything computed from "all videos" (like Melhor Horário) was
+    //    silently working off a subset. MAX_VIDEOS here is just a runaway-safety cap,
+    //    not a deliberate recency window.
     const videoIds: string[] = [];
     let pageToken: string | undefined;
     let totalFetched = 0;
-    const MAX_VIDEOS = 50;
+    const MAX_VIDEOS = 2000;
 
     while (totalFetched < MAX_VIDEOS) {
       const plUrl = new URL("https://youtube.googleapis.com/youtube/v3/playlistItems");
@@ -100,19 +102,13 @@ serve(async (req) => {
         throw new Error("playlistItems.list error: " + JSON.stringify(plData));
       }
 
-      let reachedOlder = false;
       for (const item of plData.items || []) {
-        const publishedAt = new Date(item.contentDetails.videoPublishedAt);
-        if (publishedAt < ninetyDaysAgo) {
-          reachedOlder = true;
-          break;
-        }
         videoIds.push(item.contentDetails.videoId);
         totalFetched++;
         if (totalFetched >= MAX_VIDEOS) break;
       }
 
-      if (reachedOlder || !plData.nextPageToken || totalFetched >= MAX_VIDEOS) break;
+      if (!plData.nextPageToken || totalFetched >= MAX_VIDEOS) break;
       pageToken = plData.nextPageToken;
     }
 
@@ -120,7 +116,7 @@ serve(async (req) => {
       await supabase.from("sync_logs").insert({
         platform_id: "youtube",
         status: "success",
-        message: "[videos] No recent videos found in the last 90 days",
+        message: "[videos] No videos found on the channel",
         run_at: new Date().toISOString(),
       });
       return new Response(JSON.stringify({ success: true, processed: 0 }), {
@@ -128,13 +124,16 @@ serve(async (req) => {
       });
     }
 
-    // 4. Fetch video metadata (snippet + contentDetails) in batches of 50
-    const videoMeta: Record<string, { title: string; thumbnail_url: string; published_at: string; duration_seconds: number }> = {};
+    // 4. Fetch video metadata (snippet + contentDetails + lifetime statistics) in
+    //    batches of 50. statistics.viewCount is the channel-lifetime view count for
+    //    that video, independent of any date window — this is what Melhor Horário
+    //    uses so old and new videos are compared on equal footing.
+    const videoMeta: Record<string, { title: string; thumbnail_url: string; published_at: string; duration_seconds: number; lifetime_views: number }> = {};
 
     for (let i = 0; i < videoIds.length; i += 50) {
       const batch = videoIds.slice(i, i + 50);
       const vUrl = new URL("https://youtube.googleapis.com/youtube/v3/videos");
-      vUrl.searchParams.append("part", "snippet,contentDetails");
+      vUrl.searchParams.append("part", "snippet,contentDetails,statistics");
       vUrl.searchParams.append("id", batch.join(","));
       vUrl.searchParams.append("key", apiKey);
 
@@ -151,6 +150,7 @@ serve(async (req) => {
           thumbnail_url: item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || "",
           published_at: item.snippet.publishedAt,
           duration_seconds: parseDuration(item.contentDetails.duration || "PT0S"),
+          lifetime_views: Number(item.statistics?.viewCount ?? 0),
         };
       }
     }
@@ -162,23 +162,32 @@ serve(async (req) => {
       thumbnail_url: meta.thumbnail_url,
       published_at: meta.published_at,
       duration_seconds: meta.duration_seconds,
+      lifetime_views: meta.lifetime_views,
       updated_at: new Date().toISOString(),
     }));
 
     if (videoRows.length > 0) {
-      const { error } = await supabase
-        .from("youtube_videos")
-        .upsert(videoRows, { onConflict: "video_id" });
-      if (error) console.error("youtube_videos upsert error:", error.message);
+      const chunk = <T,>(arr: T[], size: number) =>
+        Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
+      for (const c of chunk(videoRows, 500)) {
+        const { error } = await supabase.from("youtube_videos").upsert(c, { onConflict: "video_id" });
+        if (error) console.error("youtube_videos upsert error:", error.message);
+      }
     }
 
-    // 6. Fetch per-video analytics using dimensions=day (batching not supported for multiple videos with day dimension)
+    // 6. Fetch per-video DAILY analytics for the last 90 days only (dimensions=day
+    //    per-video calls don't support a longer window efficiently, and the Vídeos
+    //    tab's own period filter only ever offers up to 90 days / "todo período" of
+    //    whatever's been synced this way — lifetime totals for older videos come
+    //    from statistics.viewCount above, not from this table).
     const today = new Date();
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(today.getDate() - 90);
     const startDate = ninetyDaysAgo.toISOString().split("T")[0];
     const endDate = today.toISOString().split("T")[0];
 
     let metricsUpserted = 0;
-    
+
     // Process in chunks to avoid overwhelming the Analytics API
     for (let i = 0; i < videoIds.length; i += 5) {
       const chunk = videoIds.slice(i, i + 5);
@@ -195,7 +204,7 @@ serve(async (req) => {
           headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
         });
         const analyticsData = await analyticsRes.json();
-        
+
         if (analyticsRes.ok && analyticsData.rows) {
           const metricsRows = analyticsData.rows.map((row: any) => ({
             video_id: videoId,
@@ -207,7 +216,7 @@ serve(async (req) => {
             avg_view_duration_seconds: row[5] || 0,
             synced_at: new Date().toISOString(),
           }));
-          
+
           if (metricsRows.length > 0) {
             const { error } = await supabase
               .from("youtube_video_metrics_daily")
@@ -220,7 +229,7 @@ serve(async (req) => {
         }
         return 0;
       });
-      
+
       const results = await Promise.all(promises);
       metricsUpserted += results.reduce((acc, curr) => acc + curr, 0);
     }

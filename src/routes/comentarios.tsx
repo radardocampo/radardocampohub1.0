@@ -181,7 +181,7 @@ function CommentsPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Busca comentários publicados e a fila de moderação (até 1000 de cada por vez).
+                Busca comentários publicados, retidos para revisão e prováveis spam (até 1000 de cada por vez).
               </TooltipContent>
             </UITooltip>
           </TooltipProvider>
@@ -271,6 +271,11 @@ function CommentsPage() {
                       {c.moderation_status === "heldForReview" && (
                         <span className="text-xs bg-warning/10 text-warning px-2 py-0.5 rounded-full font-medium">
                           Aguardando moderação
+                        </span>
+                      )}
+                      {c.moderation_status === "likelySpam" && (
+                        <span className="text-xs bg-warning/10 text-warning px-2 py-0.5 rounded-full font-medium">
+                          Provável spam (oculto automaticamente)
                         </span>
                       )}
                       {c.moderation_status === "rejected" && (

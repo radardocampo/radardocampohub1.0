@@ -55,7 +55,7 @@ export type YoutubeCommentReplyRow = {
   published_at: string;
 };
 
-export type YoutubeModerationStatus = "published" | "heldForReview" | "rejected";
+export type YoutubeModerationStatus = "published" | "heldForReview" | "likelySpam" | "rejected";
 
 export type YoutubeCommentRow = {
   comment_id: string;
@@ -343,86 +343,65 @@ export const getYoutubeTopVideos = createServerFn({ method: "GET" })
     });
   });
 
-// "Melhor Horário para Postar" analisa o histórico inteiro de métricas por vídeo já
-// sincronizado, independente do seletor de período (7/30/90 dias) do topo da página.
-// Filtrar por esse período cortava a maioria dos vídeos fora da conta, deixando quase
-// todos os blocos de horário com menos de 3 vídeos (o mínimo exigido) e a sugestão
-// baseada em pouquíssimos dados.
+// "Melhor Horário para Postar" analisa TODOS os vídeos já sincronizados do canal,
+// usando o total de views vitalício de cada um (youtube_videos.lifetime_views, vindo
+// direto de videos.list statistics.viewCount) — não a tabela de métricas diárias, que
+// só guarda uma janela de 90 dias por vídeo. Um vídeo antigo teria a maior parte das
+// views fora dessa janela, então somar só os últimos 90 dias subestimaria vídeos mais
+// antigos e distorceria a comparação entre eles. lifetime_views resolve isso porque
+// não depende de quando o vídeo foi publicado.
 export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
   .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: metrics, error: metricsError } = await (supabaseAdmin as any)
-      .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, avg_view_duration_seconds") as {
-      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
-      error: { message: string } | null;
-    };
-    if (metricsError) throw new Error(metricsError.message);
-    
-    if (!metrics || metrics.length === 0) return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false };
-    
-    const map = new Map<string, { views: number; avd_weighted_sum: number; count: number }>();
-    for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, avd_weighted_sum: 0, count: 0 };
-      const dailyViews = Number(m.views);
-      curr.views += dailyViews;
-      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
-      curr.count += 1;
-      map.set(m.video_id, curr);
-    }
-    
-    const videoIds = Array.from(map.keys());
     const { data: videos, error: videosError } = await supabaseAdmin
       .from("youtube_videos")
-      .select("video_id, published_at")
-      .in("video_id", videoIds);
-      
+      .select("video_id, published_at, lifetime_views");
     if (videosError) throw new Error(videosError.message);
-    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v.published_at]));
 
-    const blocks: Record<string, { views: number; avd: number; count: number }> = {};
+    const usable = (videos ?? []).filter((v) => v.published_at);
+    if (usable.length === 0) {
+      return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false, totalVideosAnalyzed: 0, earliestPublishedAt: null };
+    }
+
+    const blocks: Record<string, { views: number; count: number }> = {};
     let totalViews = 0;
-    
-    for (const [vid, stats] of map.entries()) {
-      const published_at = videoMap.get(vid);
-      if (!published_at) continue;
-      
-      const date = new Date(published_at);
+
+    for (const v of usable) {
+      const views = Number(v.lifetime_views ?? 0);
+      const date = new Date(v.published_at!);
       const brazilTime = new Date(date.getTime() + (date.getTimezoneOffset() * 60000) - (3 * 3600000));
       const day = brazilTime.getDay();
       const hour = brazilTime.getHours();
-      
+
       let block = "Madrugada (00h-06h)";
       if (hour >= 6 && hour < 12) block = "Manhã (06h-12h)";
       else if (hour >= 12 && hour < 18) block = "Tarde (12h-18h)";
       else if (hour >= 18) block = "Noite (18h-24h)";
-      
+
       const dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
       const key = `${dayNames[day]} - ${block}`;
-      
-      if (!blocks[key]) blocks[key] = { views: 0, avd: 0, count: 0 };
-      blocks[key].views += stats.views;
-      blocks[key].avd += stats.views > 0 ? stats.avd_weighted_sum / stats.views : 0;
+
+      if (!blocks[key]) blocks[key] = { views: 0, count: 0 };
+      blocks[key].views += views;
       blocks[key].count += 1;
-      
-      totalViews += stats.views;
+
+      totalViews += views;
     }
-    
+
     const validBlocks = Object.entries(blocks)
       .filter(([_, stats]) => stats.count >= 3)
       .map(([key, stats]) => ({
         key,
         avg_views: stats.views / stats.count,
-        avg_avd: stats.avd / stats.count,
         count: stats.count,
       }))
       .sort((a, b) => b.avg_views - a.avg_views);
-      
-    const overallAvgViews = videoIds.length > 0 ? totalViews / videoIds.length : 0;
-    const publishedDates = Array.from(videoMap.values()).filter((d): d is string => !!d);
-    const earliestPublishedAt = publishedDates.length > 0
-      ? publishedDates.reduce((min, d) => (d < min ? d : min))
-      : null;
+
+    const overallAvgViews = usable.length > 0 ? totalViews / usable.length : 0;
+    const earliestPublishedAt = usable.reduce(
+      (min, v) => (v.published_at! < min ? v.published_at! : min),
+      usable[0]!.published_at!,
+    );
 
     return {
       bestBlock: validBlocks.length > 0 ? validBlocks[0] : null,
@@ -432,7 +411,7 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
       // Prova visível de que a análise usa todo o histórico sincronizado, não um
       // recorte — cada bloco individual (dia + faixa de 6h) naturalmente recebe
       // poucos vídeos porque há até 28 combinações possíveis para distribuir o total.
-      totalVideosAnalyzed: videoIds.length,
+      totalVideosAnalyzed: usable.length,
       earliestPublishedAt,
     };
   });
@@ -540,10 +519,11 @@ export type YoutubeCommentsResult = {
  * nada com texto ainda (só com "coração", que a API não expõe), "Não
  * respondidos" e "Todos" são legitimamente o mesmo conjunto.
  *
- * filter "pending" mostra a fila de moderação (moderation_status =
- * heldForReview) — comentários que a própria API do YouTube ainda não tornou
- * públicos, separado dos demais porque não fazem parte do fluxo normal de
- * resposta.
+ * filter "pending" mostra a fila de moderação (moderation_status IN
+ * heldForReview, likelySpam) — comentários que a própria API do YouTube ainda
+ * não tornou públicos (retidos para revisão explícita ou escondidos
+ * automaticamente pelo detector de spam), separados dos demais porque não
+ * fazem parte do fluxo normal de resposta.
  */
 export const getYoutubeComments = createServerFn({ method: "GET" })
   .inputValidator((data: { filter: "all" | "unanswered" | "pending" }) => data)
@@ -557,7 +537,7 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
         .select("*", { count: "exact", head: true })
         .eq("moderation_status", "published")
         .eq("has_owner_reply", false),
-      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("moderation_status", "heldForReview"),
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).in("moderation_status", ["heldForReview", "likelySpam"]),
     ]);
 
     let query = supabaseAdmin
@@ -569,7 +549,7 @@ export const getYoutubeComments = createServerFn({ method: "GET" })
       .limit(200);
 
     if (data.filter === "pending") {
-      query = query.eq("moderation_status", "heldForReview");
+      query = query.in("moderation_status", ["heldForReview", "likelySpam"]);
     } else {
       query = query.eq("moderation_status", "published");
       if (data.filter === "unanswered") {
