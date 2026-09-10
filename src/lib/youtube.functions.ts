@@ -419,12 +419,21 @@ export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
       .sort((a, b) => b.avg_views - a.avg_views);
       
     const overallAvgViews = videoIds.length > 0 ? totalViews / videoIds.length : 0;
-    
+    const publishedDates = Array.from(videoMap.values()).filter((d): d is string => !!d);
+    const earliestPublishedAt = publishedDates.length > 0
+      ? publishedDates.reduce((min, d) => (d < min ? d : min))
+      : null;
+
     return {
       bestBlock: validBlocks.length > 0 ? validBlocks[0] : null,
       blocks: validBlocks,
       overallAvgViews,
-      hasEnoughData: validBlocks.length > 0
+      hasEnoughData: validBlocks.length > 0,
+      // Prova visível de que a análise usa todo o histórico sincronizado, não um
+      // recorte — cada bloco individual (dia + faixa de 6h) naturalmente recebe
+      // poucos vídeos porque há até 28 combinações possíveis para distribuir o total.
+      totalVideosAnalyzed: videoIds.length,
+      earliestPublishedAt,
     };
   });
 

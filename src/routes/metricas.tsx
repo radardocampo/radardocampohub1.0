@@ -1235,12 +1235,18 @@ function MetricsPage() {
                 ) : (
                   <div>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Baseado na média de visualizações por horário de publicação dos seus vídeos de melhor desempenho.
+                      Baseado nos <strong>{bestTimeQuery.data.totalVideosAnalyzed} vídeos</strong> do canal
+                      {bestTimeQuery.data.earliestPublishedAt
+                        ? ` publicados desde ${new Date(bestTimeQuery.data.earliestPublishedAt).toLocaleDateString("pt-BR")}`
+                        : ""}
+                      , sempre — não muda com o período selecionado acima. Cada card abaixo mostra quantos
+                      desses vídeos caíram naquele dia + horário específico (há até 28 combinações possíveis,
+                      então poucos vídeos por combinação é esperado).
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
                       {bestTimeQuery.data.blocks.slice(0, 3).map((block: any, idx: number) => {
                         const isTop = idx === 0;
-                        const diff = bestTimeQuery.data.overallAvgViews > 0 
+                        const diff = bestTimeQuery.data.overallAvgViews > 0
                           ? ((block.avg_views - bestTimeQuery.data.overallAvgViews) / bestTimeQuery.data.overallAvgViews) * 100
                           : 0;
                         return (
@@ -1253,7 +1259,7 @@ function MetricsPage() {
                               Média de <strong>{formatNumber(Math.round(block.avg_views))} views</strong>
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              (Baseado em {block.count} vídeo{block.count !== 1 ? 's' : ''})
+                              ({block.count} de {bestTimeQuery.data.totalVideosAnalyzed} vídeos publicados neste dia + horário)
                             </p>
                             {diff > 0 && (
                               <span className="text-xs text-success font-medium inline-block mt-2">
