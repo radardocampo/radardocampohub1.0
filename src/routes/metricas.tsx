@@ -67,7 +67,6 @@ const tooltipStyle = {
 /** Translate YouTube API traffic source types to Portuguese labels. */
 const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   YT_SEARCH: "Pesquisa do YouTube",
-  SUGGESTED: "Vídeos Sugeridos",
   EXT_URL: "Tráfego Externo",
   PLAYLIST: "Playlists",
   SUBSCRIBER: "Feed de Inscritos",
@@ -80,7 +79,7 @@ const TRAFFIC_SOURCE_LABELS: Record<string, string> = {
   END_SCREEN: "Telas Finais",
   HASHTAGS: "Hashtags",
   LIVE: "Ao Vivo",
-  RELATED_VIDEO: "Vídeos Relacionados",
+  RELATED_VIDEO: "Vídeos Sugeridos",
   CAMPAIGN_CARD: "Cards de Campanha",
   ANNOTATION: "Anotações",
   ADVERTISING: "Publicidade",
@@ -126,7 +125,7 @@ function pctChange(current: number, previous: number): number | null {
 }
 
 function MetricsPage() {
-  const [days, setDays] = useState<number | null>(28);
+  const [days, setDays] = useState<number | null>(30);
   const [selected, setSelected] = useState<PlatformId>("youtube");
   const [activeTab, setActiveTab] = useState("geral");
   const [videoFilter, setVideoFilter] = useState<"all" | "shorts" | "long">("all");
@@ -151,8 +150,8 @@ function MetricsPage() {
   });
 
   const syncLogQuery = useQuery({
-    queryKey: ["sync-log", selected === "youtube" ? "youtube-sync" : selected],
-    queryFn: () => fetchLatestSync({ data: { platform_id: selected === "youtube" ? "youtube-sync" : selected } }),
+    queryKey: ["sync-log", selected],
+    queryFn: () => fetchLatestSync({ data: { platform_id: selected } }),
   });
 
   const historyExistsQuery = useQuery({
@@ -170,21 +169,25 @@ function MetricsPage() {
     queryFn: () => fetchYoutubePrev({ data: { days } }),
   });
 
+  // Audiência, geografia e tráfego são fotografias de uma janela fixa de 90 dias
+  // (definida pela edge function sync-youtube-audience), não uma série diária.
+  // Por isso não dependem do seletor de período "days" — mostram sempre o snapshot
+  // mais recente sincronizado.
   const audienceQuery = useQuery({
-    queryKey: ["youtube-audience", days],
-    queryFn: () => fetchAudience({ data: { days } }),
+    queryKey: ["youtube-audience"],
+    queryFn: () => fetchAudience(),
     enabled: selected === "youtube",
   });
 
   const geographyQuery = useQuery({
-    queryKey: ["youtube-geography", days],
-    queryFn: () => fetchGeography({ data: { days } }),
+    queryKey: ["youtube-geography"],
+    queryFn: () => fetchGeography(),
     enabled: selected === "youtube",
   });
 
   const trafficQuery = useQuery({
-    queryKey: ["youtube-traffic", days],
-    queryFn: () => fetchTrafficSources({ data: { days } }),
+    queryKey: ["youtube-traffic"],
+    queryFn: () => fetchTrafficSources(),
     enabled: selected === "youtube",
   });
 
@@ -194,16 +197,24 @@ function MetricsPage() {
     enabled: selected === "youtube",
   });
 
+  // Não depende de "days": analisa todo o histórico de vídeos sincronizado, não só o
+  // período selecionado no topo da página (ver nota em getYoutubeBestPostingTime).
   const bestTimeQuery = useQuery({
-    queryKey: ["youtube-best-time", days],
-    queryFn: () => fetchBestTime({ data: { days } }),
+    queryKey: ["youtube-best-time"],
+    queryFn: () => fetchBestTime(),
     enabled: selected === "youtube",
   });
 
-  // --- Sync mutation: daily metrics (existing button) ---
+  // --- Sync mutation: um único botão "inteligente".
+  //     Se ainda não há histórico salvo (historyExistsQuery), faz o backfill completo
+  //     (mais lento, refaz tudo desde a criação do canal). Se já há histórico, faz só a
+  //     atualização rápida dos últimos 14 dias (sync-youtube-metrics), que é o caso do
+  //     dia a dia. Assim o usuário não precisa escolher manualmente qual rodar. ---
   const syncMutation = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
+      const isFirstSync = historyExistsQuery.data === false;
+      const fnName = isFirstSync ? "backfill-youtube-history" : "sync-youtube-metrics";
+      const { data, error } = await supabase.functions.invoke(fnName, {
         method: "POST",
       });
       if (error) {
@@ -222,15 +233,26 @@ function MetricsPage() {
       if (data && typeof data === "object" && "error" in data && data.error) {
         throw new Error(String((data as { error: unknown }).error));
       }
-      return data;
+      return { data, isFirstSync };
     },
     onMutate: () => {
-      toast.info("Iniciando sincronização histórica do YouTube...", { id: "sync-youtube" });
+      const isFirstSync = historyExistsQuery.data === false;
+      toast.info(
+        isFirstSync
+          ? "Nenhum histórico encontrado — preenchendo todo o histórico do canal. Isso pode levar alguns segundos..."
+          : "Sincronizando os últimos 14 dias do YouTube...",
+        { id: "sync-youtube" },
+      );
     },
-    onSuccess: async () => {
-      toast.success("Sincronização concluída com sucesso!", { id: "sync-youtube" });
+    onSuccess: async ({ isFirstSync }) => {
+      toast.success(
+        isFirstSync ? "Histórico preenchido com sucesso!" : "Sincronização concluída com sucesso!",
+        { id: "sync-youtube" },
+      );
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-metrics-prev"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
+      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
@@ -244,45 +266,7 @@ function MetricsPage() {
     },
   });
 
-  const backfillMutation = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("backfill-youtube-history", {
-        method: "POST",
-      });
-      if (error) {
-        let detail = error.message;
-        const response = (error as { context?: Response }).context;
-        if (response && typeof response.json === "function") {
-          try {
-            const body = await response.clone().json();
-            if (body?.error) detail = String(body.error);
-          } catch {
-            /* ignore */
-          }
-        }
-        throw new Error(detail);
-      }
-      if (data && typeof data === "object" && "error" in data && data.error) {
-        throw new Error(String((data as { error: unknown }).error));
-      }
-      return data;
-    },
-    onMutate: () => {
-      toast.info("Iniciando backfill histórico. Isso pode levar alguns segundos...", { id: "backfill-youtube" });
-    },
-    onSuccess: async () => {
-      toast.success("Histórico preenchido com sucesso!", { id: "backfill-youtube" });
-      await queryClient.invalidateQueries({ queryKey: ["youtube-metrics"] });
-      await queryClient.invalidateQueries({ queryKey: ["youtube-history-exists"] });
-      await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
-    },
-    onError: (error: unknown) => {
-      const message = error instanceof Error ? error.message : "Erro desconhecido";
-      toast.error(`Falha ao sincronizar: ${message}`, { id: "sync-youtube", duration: 8000 });
-    },
-  });
-
-  // --- Sync mutation: audience + videos (new button) ---
+  // --- Sync mutation: audience + videos (comments now sync from their own page, /comentarios) ---
   const syncAudienceVideosMutation = useMutation({
     mutationFn: async () => {
       // Call audience sync
@@ -318,6 +302,7 @@ function MetricsPage() {
       await queryClient.invalidateQueries({ queryKey: ["youtube-geography"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-traffic"] });
       await queryClient.invalidateQueries({ queryKey: ["youtube-videos"] });
+      await queryClient.invalidateQueries({ queryKey: ["youtube-best-time"] });
       await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
     },
     onError: (error: unknown) => {
@@ -339,11 +324,25 @@ function MetricsPage() {
         followers: row.followers,
         views: row.views,
         likes: row.likes,
+        comments: row.comments || 0,
+        shares: row.shares || 0,
         engagement_rate: row.engagement_rate,
         watch_time_hours: row.watch_time_hours || 0,
+        avd_seconds: row.avd_seconds || 0,
         subs_gained: row.subs_gained || 0,
         subs_lost: row.subs_lost || 0,
-      } as MetricPoint & { watch_time_hours: number; subs_gained: number; subs_lost: number };
+        synced_at: row.synced_at,
+        views_estimated: row.views_estimated || false,
+      } as MetricPoint & {
+        comments: number;
+        shares: number;
+        watch_time_hours: number;
+        avd_seconds: number;
+        subs_gained: number;
+        subs_lost: number;
+        synced_at?: string;
+        views_estimated?: boolean;
+      };
     });
 
     const first = rows[0]!;
@@ -358,8 +357,11 @@ function MetricsPage() {
     const totalComments = rows.reduce((acc, row) => acc + (row.comments || 0), 0);
     const totalShares = rows.reduce((acc, row) => acc + (row.shares || 0), 0);
     const totalWatchTime = rows.reduce((acc, row) => acc + (row.watch_time_hours || 0), 0);
-    const totalAvd = rows.reduce((acc, row) => acc + (row.avd_seconds || 0), 0);
-    const avgAvd = rows.length > 0 ? totalAvd / rows.length : 0;
+    // Ponderado por views (mesmo método usado no AVD por vídeo na aba "Vídeos"),
+    // em vez de uma média simples dos AVDs diários — evita que um dia com poucas
+    // views e AVD alto distorça a média do período.
+    const avdWeightedSum = rows.reduce((acc, row) => acc + (row.avd_seconds || 0) * row.views, 0);
+    const avgAvd = totalViews > 0 ? avdWeightedSum / totalViews : 0;
     const avgEngagement = totalViews > 0 ? Number((((totalLikes + totalComments) / totalViews) * 100).toFixed(2)) : 0;
     const totalSubsGained = rows.reduce((acc, row) => acc + (row.subs_gained || 0), 0);
     const totalSubsLost = rows.reduce((acc, row) => acc + (row.subs_lost || 0), 0);
@@ -485,14 +487,31 @@ function MetricsPage() {
            csv += `${r.date},${r.followers},${r.views},${r.likes},${r.comments || 0},${r.shares || 0},${r.engagement_rate}\n`;
          });
        }
-    } else if (activeTab === "videos") {
+    } else if (activeTab === "retencao" && isYoutube) {
+       csv = "Data,Tempo de Exibicao (h),AVD (s)\n";
+       if (current && current.series) {
+         current.series.forEach((r: any) => {
+           csv += `${r.date},${r.watch_time_hours || 0},${r.avd_seconds || 0}\n`;
+         });
+       }
+    } else if (activeTab === "audiencia" && isYoutube) {
+       csv = "Data,Inscritos Ganhos,Inscritos Perdidos\n";
+       if (current && current.series) {
+         current.series.forEach((r: any) => {
+           csv += `${r.date},${r.subs_gained || 0},${r.subs_lost || 0}\n`;
+         });
+       }
+    } else if (activeTab === "videos" && isYoutube) {
        csv = "Video_ID,Titulo,Data,Views,Curtidas,Comentarios,Engajamento,Tempo(h),AVD(s)\n";
        filteredVideos.forEach(v => {
          const safeTitle = v.title ? v.title.replace(/,/g, "") : "";
          csv += `${v.video_id},${safeTitle},${v.published_at.split("T")[0]},${v.views},${v.likes},${v.comments},${(v as any).eng_rate?.toFixed(2) || 0},${v.watch_time_hours},${v.avg_view_duration_seconds}\n`;
        });
     }
-    if (!csv) return;
+    if (!csv) {
+      toast.info("Nenhum dado para exportar nesta aba ainda.");
+      return;
+    }
     
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -532,8 +551,13 @@ function MetricsPage() {
     return (
       <div className="mt-8 grid gap-8 lg:grid-cols-2">
         <div className="h-[340px]">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Views por dia
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            {seriesData[seriesData.length - 1]?.views_estimated
+              ? "O último dia ainda não foi processado pelo YouTube Analytics — o número mostrado é uma estimativa baseada nas views totais do canal, e será substituído pelo valor real na próxima sincronização."
+              : " "}
           </p>
           <ResponsiveContainer width="100%" height="90%">
             <AreaChart data={seriesData}>
@@ -683,7 +707,10 @@ function MetricsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs">
-                    Atualiza as métricas diárias gerais (views, inscritos, engajamento) do canal.
+                    Atualiza as métricas diárias gerais (views, inscritos, engajamento).
+                    {historyExistsQuery.data === false
+                      ? " Nenhum histórico encontrado ainda — vai buscar tudo desde a criação do canal (mais lento)."
+                      : " Busca só os últimos 14 dias (rápido)."}
                     {current?.series?.[current.series.length - 1]?.synced_at && (
                       <span className="block mt-1 text-muted-foreground">
                         Última sync: {new Date(current.series[current.series.length - 1].synced_at).toLocaleString("pt-BR")}
@@ -702,8 +729,12 @@ function MetricsPage() {
                       return `${Math.floor(mins/1440)}d`;
                     })()
                   }
-                  <span className={`flex items-center gap-1 font-medium ${syncLogQuery.data.status === 'success' ? 'text-success' : 'text-destructive'}`}>
-                    · {syncLogQuery.data.status === 'success' ? 'sucesso' : 'erro'}
+                  <span className={`flex items-center gap-1 font-medium ${
+                    syncLogQuery.data.status === 'success' ? 'text-success'
+                    : syncLogQuery.data.status === 'warning' ? 'text-warning'
+                    : 'text-destructive'
+                  }`}>
+                    · {syncLogQuery.data.status === 'success' ? 'sucesso' : syncLogQuery.data.status === 'warning' ? 'aviso' : 'erro'}
                   </span>
                 </div>
               )}
@@ -833,6 +864,11 @@ function MetricsPage() {
                 value={`${current.engagement_rate}%`}
                 hint="médio do período selecionado"
               />
+              <MetricTile
+                label="Receita Estimada"
+                value={formatCurrency((current as any).estimated_revenue, "USD")}
+                hint="soma do período (AdSense, em USD)"
+              />
             </div>
 
             {goalsQuery.data && goalsQuery.data.length > 0 && (
@@ -840,10 +876,16 @@ function MetricsPage() {
                 <h3 className="text-lg font-semibold mb-4">Metas do Mês</h3>
                 <div className="grid gap-6 sm:grid-cols-2">
                   {goalsQuery.data.map(goal => {
-                    let currentValue = 0;
-                    if (goal.metric === 'views') currentValue = current.views;
-                    else if (goal.metric === 'followers') currentValue = current.followers;
-                    else if (goal.metric === 'likes') currentValue = current.likes;
+                    const metricValues: Record<string, number> = {
+                      views: current.views,
+                      followers: current.followers,
+                      likes: current.likes,
+                      comments: current.comments || 0,
+                      shares: current.shares || 0,
+                      watch_time_hours: (current as any).watch_time_hours || 0,
+                      subs_gained: (current as any).subs_gained || 0,
+                    };
+                    const currentValue = metricValues[goal.metric] ?? 0;
 
                     const percent = Math.min(100, Math.max(0, (currentValue / goal.target_value) * 100));
 
@@ -1010,7 +1052,7 @@ function MetricsPage() {
                       />
                       <Tooltip
                         contentStyle={tooltipStyle}
-                        formatter={(value: number, name: string) => [formatFull(value), name === 'subs_gained' ? "Ganhos" : "Perdidos"]}
+                        formatter={(value: number, name: string) => [formatFull(value), name]}
                       />
                       <Area
                         type="monotone"
@@ -1038,7 +1080,8 @@ function MetricsPage() {
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">Demografia</h2>
               <p className="text-base text-muted-foreground mt-1">
-                Distribuição de audiência por faixa etária e gênero.
+                Distribuição de audiência por faixa etária e gênero, com base nos últimos 90 dias
+                (atualizado na última sincronização de Audiência e Vídeos).
               </p>
               {audienceQuery.isLoading ? (
                 <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
@@ -1067,13 +1110,14 @@ function MetricsPage() {
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">Top Países por Views</h2>
               <p className="text-base text-muted-foreground mt-1">
-                Distribuição geográfica da audiência nos últimos 30 dias.
+                Distribuição geográfica da audiência com base nos últimos 90 dias (atualizado na
+                última sincronização de Audiência e Vídeos).
               </p>
               {geographyQuery.isLoading ? (
                 <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
               ) : (geographyQuery.data?.length ?? 0) === 0 ? (
                 <p className="mt-8 text-base text-muted-foreground">
-                  Dados insuficientes para este período.
+                  Dados insuficientes. Clique em "Sincronizar Audiência e Vídeos" para buscar os dados.
                 </p>
               ) : (
                 <table className="mt-6 w-full text-base">
@@ -1107,13 +1151,14 @@ function MetricsPage() {
             <section className="panel mt-10 p-6">
               <h2 className="text-2xl font-semibold">Origens de Tráfego</h2>
               <p className="text-base text-muted-foreground mt-1">
-                De onde vêm as visualizações nos últimos 30 dias.
+                De onde vêm as visualizações, com base nos últimos 90 dias (atualizado na última
+                sincronização de Audiência e Vídeos).
               </p>
               {trafficQuery.isLoading ? (
                 <p className="mt-8 text-base text-muted-foreground">Carregando dados...</p>
               ) : (trafficQuery.data?.length ?? 0) === 0 ? (
                 <p className="mt-8 text-base text-muted-foreground">
-                  Dados insuficientes para este período.
+                  Dados insuficientes. Clique em "Sincronizar Audiência e Vídeos" para buscar os dados.
                 </p>
               ) : (
                 <div className="mt-8">
@@ -1160,6 +1205,7 @@ function MetricsPage() {
               </div>
               <p className="text-sm text-muted-foreground">
                 {filteredVideos.length} vídeo{filteredVideos.length !== 1 ? "s" : ""}
+                {days !== null && " publicado" + (filteredVideos.length !== 1 ? "s" : "") + " nos últimos " + days + " dias"}
               </p>
             </div>
 
@@ -1185,10 +1231,10 @@ function MetricsPage() {
             )}
 
             {/* NEW: Best Posting Time */}
-            {bestTimeQuery.data && (
+            {(bestTimeQuery.isLoading || bestTimeQuery.data) && (
               <section className="panel mb-8 p-6">
                 <h2 className="text-xl font-semibold mb-1">Melhor Horário para Postar</h2>
-                {bestTimeQuery.isLoading ? (
+                {bestTimeQuery.isLoading || !bestTimeQuery.data ? (
                   <p className="text-sm text-muted-foreground">Analisando horários...</p>
                 ) : !bestTimeQuery.data.hasEnoughData ? (
                   <p className="text-sm text-muted-foreground">
@@ -1197,12 +1243,18 @@ function MetricsPage() {
                 ) : (
                   <div>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Baseado na média de visualizações por horário de publicação dos seus vídeos de melhor desempenho.
+                      Baseado nos <strong>{bestTimeQuery.data.totalVideosAnalyzed} vídeos</strong> do canal
+                      {bestTimeQuery.data.earliestPublishedAt
+                        ? ` publicados desde ${new Date(bestTimeQuery.data.earliestPublishedAt).toLocaleDateString("pt-BR")}`
+                        : ""}
+                      , sempre — não muda com o período selecionado acima. Cada card abaixo mostra quantos
+                      desses vídeos caíram naquele dia + horário específico (há até 28 combinações possíveis,
+                      então poucos vídeos por combinação é esperado).
                     </p>
                     <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
                       {bestTimeQuery.data.blocks.slice(0, 3).map((block: any, idx: number) => {
                         const isTop = idx === 0;
-                        const diff = bestTimeQuery.data.overallAvgViews > 0 
+                        const diff = bestTimeQuery.data.overallAvgViews > 0
                           ? ((block.avg_views - bestTimeQuery.data.overallAvgViews) / bestTimeQuery.data.overallAvgViews) * 100
                           : 0;
                         return (
@@ -1215,7 +1267,7 @@ function MetricsPage() {
                               Média de <strong>{formatNumber(Math.round(block.avg_views))} views</strong>
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              (Baseado em {block.count} vídeo{block.count !== 1 ? 's' : ''})
+                              ({block.count} de {bestTimeQuery.data.totalVideosAnalyzed} vídeos publicados neste dia + horário)
                             </p>
                             {diff > 0 && (
                               <span className="text-xs text-success font-medium inline-block mt-2">

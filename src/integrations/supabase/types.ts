@@ -132,6 +132,36 @@ export type Database = {
           },
         ]
       }
+      growth_goals: {
+        Row: {
+          created_at: string
+          id: string
+          metric: string
+          period: string
+          platform_id: string
+          target_value: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric: string
+          period: string
+          platform_id: string
+          target_value: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric?: string
+          period?: string
+          platform_id?: string
+          target_value?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       metrics_daily: {
         Row: {
           avd_seconds: number | null
@@ -149,6 +179,7 @@ export type Database = {
           subs_lost: number | null
           synced_at: string
           views: number
+          views_estimated: boolean
           watch_time_hours: number | null
         }
         Insert: {
@@ -167,6 +198,7 @@ export type Database = {
           subs_lost?: number | null
           synced_at?: string
           views?: number
+          views_estimated?: boolean
           watch_time_hours?: number | null
         }
         Update: {
@@ -185,6 +217,7 @@ export type Database = {
           subs_lost?: number | null
           synced_at?: string
           views?: number
+          views_estimated?: boolean
           watch_time_hours?: number | null
         }
         Relationships: [
@@ -328,6 +361,101 @@ export type Database = {
         }
         Relationships: []
       }
+      youtube_comment_replies: {
+        Row: {
+          author_channel_id: string | null
+          author_display_name: string | null
+          is_owner: boolean
+          parent_comment_id: string
+          published_at: string | null
+          reply_id: string
+          synced_at: string
+          text_display: string | null
+          updated_at: string
+        }
+        Insert: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          is_owner?: boolean
+          parent_comment_id: string
+          published_at?: string | null
+          reply_id: string
+          synced_at?: string
+          text_display?: string | null
+          updated_at?: string
+        }
+        Update: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          is_owner?: boolean
+          parent_comment_id?: string
+          published_at?: string | null
+          reply_id?: string
+          synced_at?: string
+          text_display?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "youtube_comment_replies_parent_comment_id_fkey"
+            columns: ["parent_comment_id"]
+            isOneToOne: false
+            referencedRelation: "youtube_comments"
+            referencedColumns: ["comment_id"]
+          },
+        ]
+      }
+      youtube_comments: {
+        Row: {
+          author_channel_id: string | null
+          author_display_name: string | null
+          author_profile_image_url: string | null
+          can_reply: boolean
+          comment_id: string
+          has_owner_reply: boolean
+          like_count: number
+          moderation_status: string
+          published_at: string | null
+          synced_at: string
+          text_display: string | null
+          total_reply_count: number
+          updated_at: string
+          video_id: string
+        }
+        Insert: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          author_profile_image_url?: string | null
+          can_reply?: boolean
+          comment_id: string
+          has_owner_reply?: boolean
+          like_count?: number
+          moderation_status?: string
+          published_at?: string | null
+          synced_at?: string
+          text_display?: string | null
+          total_reply_count?: number
+          updated_at?: string
+          video_id: string
+        }
+        Update: {
+          author_channel_id?: string | null
+          author_display_name?: string | null
+          author_profile_image_url?: string | null
+          can_reply?: boolean
+          comment_id?: string
+          has_owner_reply?: boolean
+          like_count?: number
+          moderation_status?: string
+          published_at?: string | null
+          synced_at?: string
+          text_display?: string | null
+          total_reply_count?: number
+          updated_at?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
       youtube_geography_daily: {
         Row: {
           country_code: string
@@ -379,6 +507,24 @@ export type Database = {
         }
         Relationships: []
       }
+      youtube_channel_view_snapshots: {
+        Row: {
+          captured_at: string
+          id: number
+          total_views: number
+        }
+        Insert: {
+          captured_at?: string
+          id?: number
+          total_views: number
+        }
+        Update: {
+          captured_at?: string
+          id?: number
+          total_views?: number
+        }
+        Relationships: []
+      }
       youtube_video_metrics_daily: {
         Row: {
           avg_view_duration_seconds: number | null
@@ -387,6 +533,7 @@ export type Database = {
           date: string
           id: string
           likes: number | null
+          synced_at: string
           updated_at: string
           video_id: string
           views: number | null
@@ -399,6 +546,7 @@ export type Database = {
           date: string
           id?: string
           likes?: number | null
+          synced_at?: string
           updated_at?: string
           video_id: string
           views?: number | null
@@ -411,6 +559,7 @@ export type Database = {
           date?: string
           id?: string
           likes?: number | null
+          synced_at?: string
           updated_at?: string
           video_id?: string
           views?: number | null
@@ -421,6 +570,9 @@ export type Database = {
       youtube_videos: {
         Row: {
           duration_seconds: number | null
+          lifetime_comment_count: number | null
+          lifetime_likes: number | null
+          lifetime_views: number | null
           published_at: string | null
           thumbnail_url: string | null
           title: string | null
@@ -429,6 +581,9 @@ export type Database = {
         }
         Insert: {
           duration_seconds?: number | null
+          lifetime_comment_count?: number | null
+          lifetime_likes?: number | null
+          lifetime_views?: number | null
           published_at?: string | null
           thumbnail_url?: string | null
           title?: string | null
@@ -437,6 +592,9 @@ export type Database = {
         }
         Update: {
           duration_seconds?: number | null
+          lifetime_comment_count?: number | null
+          lifetime_likes?: number | null
+          lifetime_views?: number | null
           published_at?: string | null
           thumbnail_url?: string | null
           title?: string | null

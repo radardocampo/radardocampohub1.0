@@ -14,6 +14,7 @@ export type YoutubeDailyRow = {
   comments?: number;
   shares?: number;
   synced_at?: string;
+  views_estimated?: boolean;
 };
 
 export type YoutubeAudienceRow = {
@@ -47,6 +48,33 @@ export type YoutubeVideoRow = {
   eng_rate?: number;
 };
 
+export type YoutubeCommentReplyRow = {
+  reply_id: string;
+  author_display_name: string;
+  text_display: string;
+  is_owner: boolean;
+  published_at: string;
+};
+
+export type YoutubeModerationStatus = "published" | "heldForReview" | "likelySpam" | "rejected";
+
+export type YoutubeCommentRow = {
+  comment_id: string;
+  video_id: string;
+  video_title: string;
+  video_thumbnail_url: string;
+  author_display_name: string;
+  author_profile_image_url: string;
+  text_display: string;
+  like_count: number;
+  total_reply_count: number;
+  has_owner_reply: boolean;
+  can_reply: boolean;
+  moderation_status: YoutubeModerationStatus;
+  published_at: string;
+  replies: YoutubeCommentReplyRow[];
+};
+
 /** Lê as métricas diárias reais do YouTube já salvas no banco. */
 export const getYoutubeMetrics = createServerFn({ method: "GET" })
   .inputValidator((data: { days: number | null }) => ({
@@ -56,7 +84,7 @@ export const getYoutubeMetrics = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let query = supabaseAdmin
       .from("metrics_daily")
-      .select("date, followers, views, likes, engagement_rate, watch_time_hours, avd_seconds, subs_gained, subs_lost, estimated_revenue, comments, shares, synced_at")
+      .select("date, followers, views, likes, engagement_rate, watch_time_hours, avd_seconds, subs_gained, subs_lost, estimated_revenue, comments, shares, synced_at, views_estimated")
       .eq("platform_id", "youtube")
       .order("date", { ascending: true });
 
@@ -83,6 +111,7 @@ export const getYoutubeMetrics = createServerFn({ method: "GET" })
       comments: r.comments ? Number(r.comments) : 0,
       shares: r.shares ? Number(r.shares) : 0,
       synced_at: r.synced_at,
+      views_estimated: !!(r as { views_estimated?: boolean }).views_estimated,
     }));
   });
 
@@ -142,291 +171,260 @@ export const checkYoutubeHistoryExists = createServerFn({ method: "GET" })
     return !!row;
   });
 
-/** Lê dados de audiência demográfica (idade × gênero). */
+/**
+ * Lê dados de audiência demográfica (idade × gênero).
+ *
+ * Cada linha em `youtube_audience_daily` já é uma fotografia agregada de uma
+ * janela fixa de 90 dias (definida pela edge function sync-youtube-audience),
+ * marcada com a data em que a sincronização rodou — não uma métrica por dia.
+ * Por isso lemos apenas o snapshot mais recente, em vez de somar/tirar média
+ * de várias janelas de 90 dias sobrepostas (o que não teria significado
+ * estatístico e ignoraria o parâmetro de período da UI de qualquer forma).
+ */
 export const getYoutubeAudience = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeAudienceRow[]> => {
+  .handler(async (): Promise<YoutubeAudienceRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_audience_daily")
-      .select("date, age_group, gender, viewer_percentage");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_audience_daily")
+      .select("age_group, gender, viewer_percentage")
+      .eq("date", latest.date);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, { sum: number; count: number }>();
-    for (const r of (rows ?? [])) {
-      const key = `${r.age_group}_${r.gender}`;
-      const curr = map.get(key) ?? { sum: 0, count: 0 };
-      curr.sum += Number(r.viewer_percentage);
-      curr.count += 1;
-      map.set(key, curr);
-    }
-
-    const aggregated: YoutubeAudienceRow[] = [];
-    for (const [key, val] of map.entries()) {
-      const [age_group, gender] = key.split("_");
-      aggregated.push({
-        age_group: age_group!,
-        gender: gender!,
-        viewer_percentage: Number((val.sum / val.count).toFixed(3)),
-      });
-    }
-
-    return aggregated;
+    return (rows ?? []).map((r) => ({
+      age_group: r.age_group,
+      gender: r.gender,
+      viewer_percentage: Number(r.viewer_percentage),
+    }));
   });
 
-/** Lê dados geográficos (top países por views). */
+/**
+ * Lê dados geográficos (top países por views).
+ * Ver nota em `getYoutubeAudience`: lê apenas o snapshot mais recente de 90 dias.
+ */
 export const getYoutubeGeography = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeGeographyRow[]> => {
+  .handler(async (): Promise<YoutubeGeographyRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_geography_daily")
-      .select("date, country_code, views, watch_time_minutes");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_geography_daily")
+      .select("country_code, views, watch_time_minutes")
+      .eq("date", latest.date)
+      .order("views", { ascending: false })
+      .limit(10);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, { views: number; watch_time: number }>();
-    for (const r of (rows ?? [])) {
-      const curr = map.get(r.country_code) ?? { views: 0, watch_time: 0 };
-      curr.views += Number(r.views);
-      curr.watch_time += Number(r.watch_time_minutes);
-      map.set(r.country_code, curr);
-    }
-
-    const aggregated: YoutubeGeographyRow[] = [];
-    for (const [code, val] of map.entries()) {
-      aggregated.push({
-        country_code: code,
-        views: val.views,
-        watch_time_minutes: val.watch_time,
-      });
-    }
-
-    return aggregated.sort((a, b) => b.views - a.views).slice(0, 10);
+    return (rows ?? []).map((r) => ({
+      country_code: r.country_code,
+      views: Number(r.views),
+      watch_time_minutes: Number(r.watch_time_minutes),
+    }));
   });
 
-/** Lê dados de origens de tráfego. */
+/**
+ * Lê dados de origens de tráfego.
+ * Ver nota em `getYoutubeAudience`: lê apenas o snapshot mais recente de 90 dias.
+ */
 export const getYoutubeTrafficSources = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }): Promise<YoutubeTrafficSourceRow[]> => {
+  .handler(async (): Promise<YoutubeTrafficSourceRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let query = supabaseAdmin
+    const { data: latest, error: latestError } = await supabaseAdmin
       .from("youtube_traffic_sources_daily")
-      .select("date, traffic_source_type, views");
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) throw new Error(latestError.message);
+    if (!latest) return [];
 
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      query = query.gte("date", from.toISOString().slice(0, 10));
-    }
-
-    const { data: rows, error } = await query;
+    const { data: rows, error } = await supabaseAdmin
+      .from("youtube_traffic_sources_daily")
+      .select("traffic_source_type, views")
+      .eq("date", latest.date)
+      .order("views", { ascending: false })
+      .limit(20);
     if (error) throw new Error(error.message);
 
-    const map = new Map<string, number>();
-    for (const r of (rows ?? [])) {
-      map.set(r.traffic_source_type, (map.get(r.traffic_source_type) ?? 0) + Number(r.views));
-    }
-
-    const aggregated: YoutubeTrafficSourceRow[] = [];
-    for (const [type, views] of map.entries()) {
-      aggregated.push({ traffic_source_type: type, views });
-    }
-
-    return aggregated.sort((a, b) => b.views - a.views).slice(0, 20);
+    return (rows ?? []).map((r) => ({
+      traffic_source_type: r.traffic_source_type,
+      views: Number(r.views),
+    }));
   });
 
-/** Lê ranking de vídeos com métricas (join youtube_videos + youtube_video_metrics_daily). */
+/**
+ * Lê ranking de vídeos com métricas.
+ *
+ * O filtro de período (7/30/90 dias ou "Todo período") escolhe quais vídeos
+ * entram na lista pela data de PUBLICAÇÃO (published_at) — "vídeos que lancei
+ * nessa janela" — não por terem tido alguma visualização nesses dias. A
+ * primeira versão filtrava por atividade recente, mas quase todo vídeo do
+ * canal ainda recebe visualizações residuais todos os dias, então o total
+ * empacava no mesmo número em 7, 30 e 90 dias e só "Todo período" mudava —
+ * confuso, já que a contagem parecia ignorar o filtro.
+ *
+ * As métricas de cada vídeo (views/curtidas/comentários) são sempre
+ * vitalícias (da Data API, statistics.viewCount etc.) independente da
+ * janela, porque um vídeo publicado há poucos dias dentro do período já
+ * carrega praticamente todo seu histórico ali mesmo. Tempo de exibição e AVD
+ * vêm de youtube_video_metrics_daily (a Data API não expõe watch time), sem
+ * filtro de data — vitalícios pelo mesmo motivo.
+ */
 export const getYoutubeTopVideos = createServerFn({ method: "GET" })
   .inputValidator((data: { days: number | null }) => ({
     days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
   }))
   .handler(async ({ data }): Promise<YoutubeVideoRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    
-    let metricsQuery = (supabaseAdmin as any)
-      .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, likes, comments, watch_time_hours, avg_view_duration_seconds") as any;
+
+    let videosQuery = supabaseAdmin
+      .from("youtube_videos")
+      .select("video_id, title, thumbnail_url, published_at, duration_seconds, lifetime_views, lifetime_likes, lifetime_comment_count");
 
     if (data.days !== null) {
       const from = new Date();
       from.setDate(from.getDate() - data.days);
-      metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
+      videosQuery = videosQuery.gte("published_at", from.toISOString());
     }
 
-    const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
-      error: { message: string } | null;
-    };
-    if (metricsError) throw new Error(metricsError.message);
-    if (!metrics || metrics.length === 0) return [];
-
-    const map = new Map<string, { views: number; likes: number; comments: number; watch_time: number; avd_weighted_sum: number; count: number }>();
-    for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, likes: 0, comments: 0, watch_time: 0, avd_weighted_sum: 0, count: 0 };
-      const dailyViews = Number(m.views);
-      curr.views += dailyViews;
-      curr.likes += Number(m.likes);
-      curr.comments += Number(m.comments);
-      curr.watch_time += Number(m.watch_time_hours);
-      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
-      curr.count += 1;
-      map.set(m.video_id, curr);
-    }
-
-    const aggregatedList = Array.from(map.entries())
-      .map(([id, val]) => ({
-        video_id: id,
-        views: val.views,
-        likes: val.likes,
-        comments: val.comments,
-        watch_time_hours: val.watch_time,
-        avg_view_duration_seconds: val.views > 0 ? val.avd_weighted_sum / val.views : 0,
-      }))
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 50);
-
-    const videoIds = aggregatedList.map((m) => m.video_id);
-    const { data: videos, error: videosError } = await supabaseAdmin
-      .from("youtube_videos")
-      .select("video_id, title, thumbnail_url, published_at, duration_seconds")
-      .in("video_id", videoIds);
-
+    const { data: videos, error: videosError } = await videosQuery;
     if (videosError) throw new Error(videosError.message);
+    if (!videos || videos.length === 0) return [];
 
-    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v]));
+    const videoIds = videos.map((v) => v.video_id);
+    // Paginated (see fetchAllRows): a project's PostgREST response cap (1000
+    // rows here) silently truncates any unbounded/high-`.limit()` select —
+    // no client-side limit value can raise it. Scoped to just this window's
+    // video_ids (small even for "Todo período", ~134 videos) rather than the
+    // whole table, so this stays cheap for narrow windows too.
+    const dailyMetrics = await fetchAllRows<{ video_id: string; views: number; watch_time_hours?: number; avg_view_duration_seconds?: number }>(
+      (rangeFrom, rangeTo) =>
+        (supabaseAdmin as any)
+          .from("youtube_video_metrics_daily")
+          .select("video_id, views, watch_time_hours, avg_view_duration_seconds")
+          .in("video_id", videoIds)
+          .order("id", { ascending: true })
+          .range(rangeFrom, rangeTo),
+    );
 
-    return aggregatedList.map((m) => {
-      const v = videoMap.get(m.video_id);
-      return {
-        video_id: m.video_id,
-        title: v?.title ?? "",
-        thumbnail_url: v?.thumbnail_url ?? "",
-        published_at: v?.published_at ?? "",
-        duration_seconds: v?.duration_seconds ?? 0,
-        views: m.views,
-        likes: m.likes,
-        comments: m.comments,
-        watch_time_hours: m.watch_time_hours,
-        avg_view_duration_seconds: m.avg_view_duration_seconds,
-        eng_rate: m.views > 0 ? ((m.likes + m.comments) / m.views) * 100 : 0,
-      };
-    });
+    const watchTimeMap = new Map<string, { watch_time: number; avd_weighted_sum: number; views: number }>();
+    for (const m of dailyMetrics) {
+      const curr = watchTimeMap.get(m.video_id) ?? { watch_time: 0, avd_weighted_sum: 0, views: 0 };
+      const dailyViews = Number(m.views);
+      curr.watch_time += Number(m.watch_time_hours ?? 0);
+      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds ?? 0) * dailyViews;
+      curr.views += dailyViews;
+      watchTimeMap.set(m.video_id, curr);
+    }
+
+    return videos
+      .map((v) => {
+        const views = Number(v.lifetime_views ?? 0);
+        const likes = Number(v.lifetime_likes ?? 0);
+        const comments = Number(v.lifetime_comment_count ?? 0);
+        const watchStats = watchTimeMap.get(v.video_id);
+        return {
+          video_id: v.video_id,
+          title: v.title ?? "",
+          thumbnail_url: v.thumbnail_url ?? "",
+          published_at: v.published_at ?? "",
+          duration_seconds: v.duration_seconds ?? 0,
+          views,
+          likes,
+          comments,
+          watch_time_hours: watchStats?.watch_time ?? 0,
+          avg_view_duration_seconds: watchStats && watchStats.views > 0 ? watchStats.avd_weighted_sum / watchStats.views : 0,
+          eng_rate: views > 0 ? ((likes + comments) / views) * 100 : 0,
+        };
+      })
+      .sort((a, b) => b.views - a.views);
   });
 
+// "Melhor Horário para Postar" analisa TODOS os vídeos já sincronizados do canal,
+// usando o total de views vitalício de cada um (youtube_videos.lifetime_views, vindo
+// direto de videos.list statistics.viewCount) — não a tabela de métricas diárias, que
+// só guarda uma janela de 90 dias por vídeo. Um vídeo antigo teria a maior parte das
+// views fora dessa janela, então somar só os últimos 90 dias subestimaria vídeos mais
+// antigos e distorceria a comparação entre eles. lifetime_views resolve isso porque
+// não depende de quando o vídeo foi publicado.
 export const getYoutubeBestPostingTime = createServerFn({ method: "GET" })
-  .inputValidator((data: { days: number | null }) => ({
-    days: data.days === null ? null : Math.min(365, Math.max(1, Math.floor(data.days))),
-  }))
-  .handler(async ({ data }) => {
-    // Calling the function directly inside server scope requires re-importing dependencies if they were strictly encapsulated,
-    // but we can just do the work. We'll reuse the logic we just defined.
-    // Instead of calling getYoutubeTopVideos which is wrapped by createServerFn, we'll fetch from db directly here
-    // or just fetch all videos and metrics.
+  .handler(async () => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let metricsQuery = (supabaseAdmin as any)
-      .from("youtube_video_metrics_daily")
-      .select("video_id, date, views, avg_view_duration_seconds") as any;
-      
-    if (data.days !== null) {
-      const from = new Date();
-      from.setDate(from.getDate() - data.days);
-      metricsQuery = metricsQuery.gte("date", from.toISOString().slice(0, 10));
-    }
-    
-    const { data: metrics, error: metricsError } = (await metricsQuery) as {
-      data: Array<{ video_id: string; date: string; views: number; likes?: number; comments?: number; watch_time_hours?: number; avg_view_duration_seconds?: number }> | null;
-      error: { message: string } | null;
-    };
-    if (metricsError) throw new Error(metricsError.message);
-    
-    if (!metrics || metrics.length === 0) return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false };
-    
-    const map = new Map<string, { views: number; avd_weighted_sum: number; count: number }>();
-    for (const m of metrics) {
-      const curr = map.get(m.video_id) ?? { views: 0, avd_weighted_sum: 0, count: 0 };
-      const dailyViews = Number(m.views);
-      curr.views += dailyViews;
-      curr.avd_weighted_sum += Number(m.avg_view_duration_seconds) * dailyViews;
-      curr.count += 1;
-      map.set(m.video_id, curr);
-    }
-    
-    const videoIds = Array.from(map.keys());
     const { data: videos, error: videosError } = await supabaseAdmin
       .from("youtube_videos")
-      .select("video_id, published_at")
-      .in("video_id", videoIds);
-      
+      .select("video_id, published_at, lifetime_views");
     if (videosError) throw new Error(videosError.message);
-    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v.published_at]));
 
-    const blocks: Record<string, { views: number; avd: number; count: number }> = {};
+    const usable = (videos ?? []).filter((v) => v.published_at);
+    if (usable.length === 0) {
+      return { bestBlock: null, blocks: [], overallAvgViews: 0, hasEnoughData: false, totalVideosAnalyzed: 0, earliestPublishedAt: null };
+    }
+
+    const blocks: Record<string, { views: number; count: number }> = {};
     let totalViews = 0;
-    
-    for (const [vid, stats] of map.entries()) {
-      const published_at = videoMap.get(vid);
-      if (!published_at) continue;
-      
-      const date = new Date(published_at);
+
+    for (const v of usable) {
+      const views = Number(v.lifetime_views ?? 0);
+      const date = new Date(v.published_at!);
       const brazilTime = new Date(date.getTime() + (date.getTimezoneOffset() * 60000) - (3 * 3600000));
       const day = brazilTime.getDay();
       const hour = brazilTime.getHours();
-      
+
       let block = "Madrugada (00h-06h)";
       if (hour >= 6 && hour < 12) block = "Manhã (06h-12h)";
       else if (hour >= 12 && hour < 18) block = "Tarde (12h-18h)";
       else if (hour >= 18) block = "Noite (18h-24h)";
-      
+
       const dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
       const key = `${dayNames[day]} - ${block}`;
-      
-      if (!blocks[key]) blocks[key] = { views: 0, avd: 0, count: 0 };
-      blocks[key].views += stats.views;
-      blocks[key].avd += stats.views > 0 ? stats.avd_weighted_sum / stats.views : 0;
+
+      if (!blocks[key]) blocks[key] = { views: 0, count: 0 };
+      blocks[key].views += views;
       blocks[key].count += 1;
-      
-      totalViews += stats.views;
+
+      totalViews += views;
     }
-    
+
     const validBlocks = Object.entries(blocks)
       .filter(([_, stats]) => stats.count >= 3)
       .map(([key, stats]) => ({
         key,
         avg_views: stats.views / stats.count,
-        avg_avd: stats.avd / stats.count,
         count: stats.count,
       }))
       .sort((a, b) => b.avg_views - a.avg_views);
-      
-    const overallAvgViews = videoIds.length > 0 ? totalViews / videoIds.length : 0;
-    
+
+    const overallAvgViews = usable.length > 0 ? totalViews / usable.length : 0;
+    const earliestPublishedAt = usable.reduce(
+      (min, v) => (v.published_at! < min ? v.published_at! : min),
+      usable[0]!.published_at!,
+    );
+
     return {
       bestBlock: validBlocks.length > 0 ? validBlocks[0] : null,
       blocks: validBlocks,
       overallAvgViews,
-      hasEnoughData: validBlocks.length > 0
+      hasEnoughData: validBlocks.length > 0,
+      // Prova visível de que a análise usa todo o histórico sincronizado, não um
+      // recorte — cada bloco individual (dia + faixa de 6h) naturalmente recebe
+      // poucos vídeos porque há até 28 combinações possíveis para distribuir o total.
+      totalVideosAnalyzed: usable.length,
+      earliestPublishedAt,
     };
   });
 
@@ -503,7 +501,7 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
   .validator((data: { platform_id: string; period: string }) => data)
   .handler(async ({ data }): Promise<GrowthGoal[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: goals, error } = await (supabaseAdmin as any)
+    const { data: goals, error } = await supabaseAdmin
       .from("growth_goals")
       .select("platform_id, metric, target_value, period")
       .eq("platform_id", data.platform_id)
@@ -517,3 +515,153 @@ export const getPlatformGoals = createServerFn({ method: "GET" })
     }
     return (goals ?? []) as GrowthGoal[];
   });
+
+export type YoutubeCommentsResult = {
+  comments: YoutubeCommentRow[];
+  totalCount: number;
+  unansweredCount: number;
+  pendingCount: number;
+};
+
+/**
+ * Lê comentários já sincronizados (com respostas), mais recentes primeiro.
+ * Retorna também totalCount/unansweredCount/pendingCount (contagens reais, sem
+ * o corte de .limit(200) da listagem) para deixar visível quando os filtros
+ * batem por coincidência dos dados — por exemplo, se o canal nunca respondeu
+ * nada com texto ainda (só com "coração", que a API não expõe), "Não
+ * respondidos" e "Todos" são legitimamente o mesmo conjunto.
+ *
+ * filter "pending" mostra a fila de moderação (moderation_status IN
+ * heldForReview, likelySpam) — comentários que a própria API do YouTube ainda
+ * não tornou públicos (retidos para revisão explícita ou escondidos
+ * automaticamente pelo detector de spam), separados dos demais porque não
+ * fazem parte do fluxo normal de resposta.
+ */
+export const getYoutubeComments = createServerFn({ method: "GET" })
+  .inputValidator((data: { filter: "all" | "unanswered" | "pending" }) => data)
+  .handler(async ({ data }): Promise<YoutubeCommentsResult> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const [{ count: totalCount }, { count: unansweredCount }, { count: pendingCount }] = await Promise.all([
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).eq("moderation_status", "published"),
+      supabaseAdmin
+        .from("youtube_comments")
+        .select("*", { count: "exact", head: true })
+        .eq("moderation_status", "published")
+        .eq("has_owner_reply", false),
+      supabaseAdmin.from("youtube_comments").select("*", { count: "exact", head: true }).in("moderation_status", ["heldForReview", "likelySpam"]),
+    ]);
+
+    let query = supabaseAdmin
+      .from("youtube_comments")
+      .select(
+        "comment_id, video_id, author_display_name, author_profile_image_url, text_display, like_count, total_reply_count, has_owner_reply, can_reply, moderation_status, published_at",
+      )
+      .order("published_at", { ascending: false })
+      .limit(200);
+
+    if (data.filter === "pending") {
+      query = query.in("moderation_status", ["heldForReview", "likelySpam"]);
+    } else {
+      query = query.eq("moderation_status", "published");
+      if (data.filter === "unanswered") {
+        query = query.eq("has_owner_reply", false);
+      }
+    }
+
+    const { data: comments, error } = await query;
+    if (error) throw new Error(error.message);
+    if (!comments || comments.length === 0) {
+      return {
+        comments: [],
+        totalCount: totalCount ?? 0,
+        unansweredCount: unansweredCount ?? 0,
+        pendingCount: pendingCount ?? 0,
+      };
+    }
+
+    const commentIds = comments.map((c) => c.comment_id);
+    const videoIds = [...new Set(comments.map((c) => c.video_id))];
+
+    const [{ data: videos }, { data: replies }] = await Promise.all([
+      supabaseAdmin.from("youtube_videos").select("video_id, title, thumbnail_url").in("video_id", videoIds),
+      supabaseAdmin
+        .from("youtube_comment_replies")
+        .select("reply_id, parent_comment_id, author_display_name, text_display, is_owner, published_at")
+        .in("parent_comment_id", commentIds)
+        .order("published_at", { ascending: true }),
+    ]);
+
+    const videoMap = new Map((videos ?? []).map((v) => [v.video_id, v]));
+    const repliesByComment = new Map<string, YoutubeCommentReplyRow[]>();
+    for (const r of replies ?? []) {
+      const list = repliesByComment.get(r.parent_comment_id) ?? [];
+      list.push({
+        reply_id: r.reply_id,
+        author_display_name: r.author_display_name ?? "",
+        text_display: r.text_display ?? "",
+        is_owner: r.is_owner,
+        published_at: r.published_at ?? "",
+      });
+      repliesByComment.set(r.parent_comment_id, list);
+    }
+
+    const mapped = comments.map((c) => {
+      const video = videoMap.get(c.video_id);
+      return {
+        comment_id: c.comment_id,
+        video_id: c.video_id,
+        video_title: video?.title ?? "(vídeo fora do cache local)",
+        video_thumbnail_url: video?.thumbnail_url ?? "",
+        author_display_name: c.author_display_name ?? "",
+        author_profile_image_url: c.author_profile_image_url ?? "",
+        text_display: c.text_display ?? "",
+        like_count: Number(c.like_count),
+        total_reply_count: Number(c.total_reply_count),
+        has_owner_reply: c.has_owner_reply,
+        can_reply: c.can_reply,
+        moderation_status: c.moderation_status as YoutubeModerationStatus,
+        published_at: c.published_at ?? "",
+        replies: repliesByComment.get(c.comment_id) ?? [],
+      };
+    });
+
+    return {
+      comments: mapped,
+      totalCount: totalCount ?? 0,
+      unansweredCount: unansweredCount ?? 0,
+      pendingCount: pendingCount ?? 0,
+    };
+  });
+
+/**
+ * Supabase/PostgREST projects cap every REST response at a fixed row count
+ * (this project's is 1000) regardless of what `.limit()` the client asks
+ * for — confirmed by calling the real query through a service-role client
+ * and seeing exactly 1000 rows come back covering only 13 of 131 videos,
+ * even with `.limit(50000)` requested. A single `.limit()` can never be
+ * "big enough"; the only correct fix is to page through with `.range()`
+ * until a page comes back short. `.order("id")` just keeps each page
+ * disjoint and total — the id itself carries no business meaning here.
+ */
+async function fetchAllRows<T>(
+  buildPage: (rangeFrom: number, rangeTo: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const results: T[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await buildPage(offset, offset + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+    results.push(...data);
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return results;
+}
+
+export type ModerateCommentInput = {
+  comment_id: string;
+  moderation_status: YoutubeModerationStatus;
+};

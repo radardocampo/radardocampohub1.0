@@ -41,10 +41,10 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
       await supabase.from("sync_logs").insert({
-        platform_id: "youtube-backfill",
+        platform_id: "youtube",
         status: "error",
-        error_message: `Refresh token failed: ${JSON.stringify(tokenData)}`,
-        created_at: new Date().toISOString(),
+        message: `[backfill] Refresh token failed: ${JSON.stringify(tokenData)}`,
+        run_at: new Date().toISOString(),
       });
       return new Response(JSON.stringify({ error: "Falha na autenticação do YouTube" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -131,9 +131,9 @@ serve(async (req) => {
             throw new Error(`Analytics API error for year ${year}: ${JSON.stringify(analyticsResult)}`);
           }
           await supabase.from("sync_logs").insert({
-            platform_id: "youtube-backfill",
+            platform_id: "youtube",
             status: "warning",
-            message: "estimatedRevenue not available (channel not monetized or missing scope). Synced other metrics normally.",
+            message: "[backfill] estimatedRevenue not available (channel not monetized or missing scope). Synced other metrics normally.",
             run_at: new Date().toISOString(),
           });
         } else {
@@ -228,16 +228,11 @@ serve(async (req) => {
       if (runningSubscribers < 0) runningSubscribers = 0;
     }
 
-    // 6. Delete old data and Upsert new in metrics_daily
-    const { error: deleteError } = await supabase
-      .from("metrics_daily")
-      .delete()
-      .eq("platform_id", "youtube");
-      
-    if (deleteError) {
-      console.warn("Failed to delete existing historical data:", deleteError.message);
-    }
-
+    // 6. Upsert into metrics_daily. `metricsToUpsert` already covers every date from the
+    //    channel's creation to today, so the upsert (onConflict platform_id+date) fully
+    //    overwrites the historical record without needing to delete first — a prior delete
+    //    step here was removed because it made this destructive: if a chunk failed midway,
+    //    the already-deleted rows were never recreated, permanently losing history.
     const chunkSize = 1000;
     for (let i = 0; i < metricsToUpsert.length; i += chunkSize) {
       const chunk = metricsToUpsert.slice(i, i + chunkSize);
