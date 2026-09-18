@@ -75,6 +75,18 @@ serve(async (req) => {
       total_views: currentTotalViews,
     });
 
+    // DEBUG LOG
+    try {
+      const debugRes = await fetch("https://youtube.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }
+      });
+      const debugData = await debugRes.json();
+      console.log("DEBUG: channels.list mine=true returned:", JSON.stringify(debugData));
+      console.log("DEBUG: Target channelId being synced:", channelId);
+    } catch (err) {
+      console.error("DEBUG error:", err);
+    }
+
     // 3. YouTube Analytics API for the last 14 days
     const dailyData: Record<string, any> = {};
     const today = new Date();
@@ -237,6 +249,14 @@ serve(async (req) => {
         likes: likes,
         engagement_rate: engagement_rate,
         watch_time_hours: watchTimeHours,
+        avd_seconds: dataForDay.averageViewDuration,
+        subs_gained: dataForDay.subscribersGained,
+        subs_lost: dataForDay.subscribersLost,
+        estimated_revenue: dataForDay.estimatedRevenue,
+        comments: dataForDay.comments,
+        shares: dataForDay.shares,
+        raw_data: dataForDay.raw ? { analytics_row: dataForDay.raw } : null,
+        updated_at: new Date().toISOString(),
         avd_seconds: averageViewDuration,
         subs_gained: subscribersGained,
         subs_lost: subscribersLost,

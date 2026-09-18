@@ -74,6 +74,18 @@ serve(async (req) => {
     const dailyData: Record<string, any> = {};
     let revenueAvailable = true;
 
+    // DEBUG LOG
+    try {
+      const debugRes = await fetch("https://youtube.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }
+      });
+      const debugData = await debugRes.json();
+      console.log("DEBUG: channels.list mine=true returned:", JSON.stringify(debugData));
+      console.log("DEBUG: Target channelId being synced:", channelId);
+    } catch (err) {
+      console.error("DEBUG error:", err);
+    }
+
     for (let year = startYear; year <= currentYear; year++) {
       let startDateStr = `${year}-01-01`;
       let endDateStr = `${year}-12-31`;
@@ -220,7 +232,7 @@ serve(async (req) => {
         comments: dataForDay.comments,
         shares: dataForDay.shares,
         raw_data: dataForDay.raw ? { analytics_row: dataForDay.raw } : null,
-        synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
 
       // previous_day = current_day - gained + lost

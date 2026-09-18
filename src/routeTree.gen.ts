@@ -14,6 +14,7 @@ import { Route as AssistenteRouteImport } from './routes/assistente'
 import { Route as ComentariosRouteImport } from './routes/comentarios'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as IdeiasRouteImport } from './routes/ideias'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as MetricasRouteImport } from './routes/metricas'
 import { Route as PrivacidadeRouteImport } from './routes/privacidade'
 import { Route as RotinaRouteImport } from './routes/rotina'
@@ -44,6 +45,11 @@ const IdeiasRoute = IdeiasRouteImport.update({
   path: '/ideias',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MetricasRoute = MetricasRouteImport.update({
   id: '/metricas',
   path: '/metricas',
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
+  '/login': typeof LoginRoute
   '/metricas': typeof MetricasRoute
   '/privacidade': typeof PrivacidadeRoute
   '/rotina': typeof RotinaRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
+  '/login': typeof LoginRoute
   '/metricas': typeof MetricasRoute
   '/privacidade': typeof PrivacidadeRoute
   '/rotina': typeof RotinaRoute
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
+  '/login': typeof LoginRoute
   '/metricas': typeof MetricasRoute
   '/privacidade': typeof PrivacidadeRoute
   '/rotina': typeof RotinaRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/comentarios'
     | '/financeiro'
     | '/ideias'
+    | '/login'
     | '/metricas'
     | '/privacidade'
     | '/rotina'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/comentarios'
     | '/financeiro'
     | '/ideias'
+    | '/login'
     | '/metricas'
     | '/privacidade'
     | '/rotina'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/comentarios'
     | '/financeiro'
     | '/ideias'
+    | '/login'
     | '/metricas'
     | '/privacidade'
     | '/rotina'
@@ -141,6 +153,7 @@ export interface RootRouteChildren {
   ComentariosRoute: typeof ComentariosRoute
   FinanceiroRoute: typeof FinanceiroRoute
   IdeiasRoute: typeof IdeiasRoute
+  LoginRoute: typeof LoginRoute
   MetricasRoute: typeof MetricasRoute
   PrivacidadeRoute: typeof PrivacidadeRoute
   RotinaRoute: typeof RotinaRoute
@@ -184,6 +197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IdeiasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/metricas': {
       id: '/metricas'
       path: '/metricas'
@@ -221,6 +241,7 @@ const rootRouteChildren: RootRouteChildren = {
   ComentariosRoute: ComentariosRoute,
   FinanceiroRoute: FinanceiroRoute,
   IdeiasRoute: IdeiasRoute,
+  LoginRoute: LoginRoute,
   MetricasRoute: MetricasRoute,
   PrivacidadeRoute: PrivacidadeRoute,
   RotinaRoute: RotinaRoute,

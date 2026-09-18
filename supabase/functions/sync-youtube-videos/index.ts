@@ -207,13 +207,15 @@ serve(async (req) => {
     const endDate = today.toISOString().split("T")[0];
 
     let metricsUpserted = 0;
+    const analyticsErrors: any[] = [];
+    
 
     // Process in chunks to avoid overwhelming the Analytics API
     for (let i = 0; i < videoIds.length; i += 5) {
       const chunk = videoIds.slice(i, i + 5);
       const promises = chunk.map(async (videoId) => {
         const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
-        analyticsUrl.searchParams.append("ids", "channel==MINE");
+        analyticsUrl.searchParams.append("ids", `channel==${channelId}`);
         analyticsUrl.searchParams.append("startDate", startDate);
         analyticsUrl.searchParams.append("endDate", endDate);
         analyticsUrl.searchParams.append("metrics", "views,likes,comments,estimatedMinutesWatched,averageViewDuration");
@@ -224,6 +226,8 @@ serve(async (req) => {
           headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
         });
         const analyticsData = await analyticsRes.json();
+        
+        if (analyticsRes.ok && analyticsData.rows && analyticsData.rows.length > 0) {
 
         if (analyticsRes.ok && analyticsData.rows) {
           const metricsRows = analyticsData.rows.map((row: any) => ({
@@ -234,7 +238,7 @@ serve(async (req) => {
             comments: row[3] || 0,
             watch_time_hours: Number(((row[4] || 0) / 60).toFixed(2)),
             avg_view_duration_seconds: row[5] || 0,
-            synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           }));
 
           if (metricsRows.length > 0) {
@@ -246,6 +250,12 @@ serve(async (req) => {
           }
         } else if (!analyticsRes.ok) {
           console.warn(`Video analytics error for ${videoId}:`, JSON.stringify(analyticsData));
+          analyticsErrors.push({ videoId, error: analyticsData });
+        } else {
+          // OK but no rows! Let's capture this to debug.
+          if (analyticsErrors.length < 5) {
+             analyticsErrors.push({ videoId, warning: "OK but no rows", data: analyticsData });
+          }
         }
         return 0;
       });
@@ -258,12 +268,12 @@ serve(async (req) => {
     await supabase.from("sync_logs").insert({
       platform_id: "youtube",
       status: "success",
-      message: `[videos] metadata=${videoRows.length}, analytics=${metricsUpserted}`,
+      message: `[videos] metadata=${videoRows.length}, analytics=${metricsUpserted}${analyticsErrors.length ? `, errors=${analyticsErrors.length}` : ""}`,
       run_at: new Date().toISOString(),
     });
 
     return new Response(
-      JSON.stringify({ success: true, videos: videoRows.length, metrics: metricsUpserted }),
+      JSON.stringify({ success: true, videos: videoRows.length, metrics: metricsUpserted, errors: analyticsErrors }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
 
