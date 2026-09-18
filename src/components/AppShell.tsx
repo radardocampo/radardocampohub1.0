@@ -8,6 +8,7 @@ import {
   Radar,
   Sparkles,
   LogOut,
+  MessageCircle,
 } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,6 +16,7 @@ import { useAuth } from "@/hooks/use-auth";
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/metricas", label: "Métricas", icon: BarChart3 },
+  { to: "/comentarios", label: "Comentários", icon: MessageCircle },
   { to: "/financeiro", label: "Financeiro", icon: Wallet },
   { to: "/rotina", label: "Rotina", icon: ListChecks },
   { to: "/ideias", label: "Banco de Ideias", icon: Lightbulb },

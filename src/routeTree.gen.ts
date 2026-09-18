@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssistenteRouteImport } from './routes/assistente'
+import { Route as ComentariosRouteImport } from './routes/comentarios'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as IdeiasRouteImport } from './routes/ideias'
 import { Route as LoginRouteImport } from './routes/login'
@@ -27,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const AssistenteRoute = AssistenteRouteImport.update({
   id: '/assistente',
   path: '/assistente',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComentariosRoute = ComentariosRouteImport.update({
+  id: '/comentarios',
+  path: '/comentarios',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FinanceiroRoute = FinanceiroRouteImport.update({
@@ -68,6 +74,7 @@ const TermosRoute = TermosRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assistente': typeof AssistenteRoute
+  '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
   '/login': typeof LoginRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assistente': typeof AssistenteRoute
+  '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
   '/login': typeof LoginRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assistente': typeof AssistenteRoute
+  '/comentarios': typeof ComentariosRoute
   '/financeiro': typeof FinanceiroRoute
   '/ideias': typeof IdeiasRoute
   '/login': typeof LoginRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/assistente'
+    | '/comentarios'
     | '/financeiro'
     | '/ideias'
     | '/login'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/assistente'
+    | '/comentarios'
     | '/financeiro'
     | '/ideias'
     | '/login'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/assistente'
+    | '/comentarios'
     | '/financeiro'
     | '/ideias'
     | '/login'
@@ -138,6 +150,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssistenteRoute: typeof AssistenteRoute
+  ComentariosRoute: typeof ComentariosRoute
   FinanceiroRoute: typeof FinanceiroRoute
   IdeiasRoute: typeof IdeiasRoute
   LoginRoute: typeof LoginRoute
@@ -161,6 +174,13 @@ declare module '@tanstack/react-router' {
       path: '/assistente'
       fullPath: '/assistente'
       preLoaderRoute: typeof AssistenteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/comentarios': {
+      id: '/comentarios'
+      path: '/comentarios'
+      fullPath: '/comentarios'
+      preLoaderRoute: typeof ComentariosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/financeiro': {
@@ -218,6 +238,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssistenteRoute: AssistenteRoute,
+  ComentariosRoute: ComentariosRoute,
   FinanceiroRoute: FinanceiroRoute,
   IdeiasRoute: IdeiasRoute,
   LoginRoute: LoginRoute,
