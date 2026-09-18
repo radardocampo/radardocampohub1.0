@@ -1,16 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { IDEA_STATUSES, MOCK_IDEAS, STATUS_LABEL, type IdeaStatus } from "@/lib/mock-data";
 import { getPlatform } from "@/lib/platforms";
 
-const STATUS_STYLE: Record<IdeaStatus, string> = {
-  ideia: "bg-secondary text-muted-foreground",
-  roteirizado: "bg-chart-2/15 text-chart-2",
-  gravado: "bg-warning/15 text-warning",
-  publicado: "bg-success/15 text-success",
+/**
+ * O status é uma etapa do funil, então ele é lido como uma trilha: um ponto
+ * colorido e o nome. Quatro pílulas preenchidas de cores diferentes fariam
+ * cada card gritar mais alto que o título da ideia.
+ */
+const STATUS_DOT: Record<IdeaStatus, string> = {
+  ideia: "bg-subtle",
+  roteirizado: "bg-chart-2",
+  gravado: "bg-warning",
+  publicado: "bg-success",
 };
 
 export const Route = createFileRoute("/ideias")({
@@ -37,34 +40,49 @@ function IdeasPage() {
   const [filter, setFilter] = useState<IdeaStatus | "todos">("todos");
   const ideas = filter === "todos" ? MOCK_IDEAS : MOCK_IDEAS.filter((i) => i.status === filter);
 
+  const filters: { value: IdeaStatus | "todos"; label: string; count: number }[] = [
+    { value: "todos", label: "Todas", count: MOCK_IDEAS.length },
+    ...IDEA_STATUSES.map((status) => ({
+      value: status,
+      label: STATUS_LABEL[status],
+      count: MOCK_IDEAS.filter((i) => i.status === status).length,
+    })),
+  ];
+
   return (
     <AppShell
       title="Banco de Ideias"
       subtitle="Pipeline de conteúdo, da ideia até a publicação."
       actions={
-        <Badge className="bg-secondary text-secondary-foreground">{MOCK_IDEAS.length} ideias</Badge>
+        <span className="hidden text-sm tabular-nums text-muted-foreground sm:inline">
+          {MOCK_IDEAS.length} ideias
+        </span>
       }
     >
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant={filter === "todos" ? "default" : "secondary"}
-          onClick={() => setFilter("todos")}
-          aria-pressed={filter === "todos"}
-        >
-          Todos
-        </Button>
-        {IDEA_STATUSES.map((status) => (
-          <Button
-            key={status}
-            size="sm"
-            variant={filter === status ? "default" : "secondary"}
-            onClick={() => setFilter(status)}
-            aria-pressed={filter === status}
-          >
-            {STATUS_LABEL[status]} ({MOCK_IDEAS.filter((i) => i.status === status).length})
-          </Button>
-        ))}
+      <div
+        role="group"
+        aria-label="Filtrar por etapa"
+        className="inline-flex flex-wrap gap-0.5 rounded-md border border-border bg-surface p-0.5"
+      >
+        {filters.map((item) => {
+          const active = filter === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setFilter(item.value)}
+              aria-pressed={active}
+              className={`rounded-[0.3rem] px-3 py-1.5 text-sm font-medium transition-colors ${
+                active
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {item.label}
+              <span className="ml-1.5 text-xs tabular-nums text-subtle">{item.count}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -72,29 +90,41 @@ function IdeasPage() {
           const meta = getPlatform(idea.platform_id);
           const Icon = meta.icon;
           return (
-            <article key={idea.id} className="panel flex flex-col p-5">
-              <div className="flex items-center justify-between gap-3">
-                <span
-                  className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs ${meta.bgClass} ${meta.textClass}`}
-                >
-                  <Icon className="size-3.5" />
+            <article key={idea.id} className="panel flex flex-col p-4">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <Icon className="size-3.5" style={{ color: meta.color }} aria-hidden />
                   {meta.name}
                 </span>
-                <span
-                  className={`rounded-md px-2 py-1 text-xs font-medium ${STATUS_STYLE[idea.status]}`}
-                >
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span
+                    className={`size-1.5 rounded-full ${STATUS_DOT[idea.status]}`}
+                    aria-hidden
+                  />
                   {STATUS_LABEL[idea.status]}
                 </span>
               </div>
-              <h2 className="mt-4 text-base font-semibold">{idea.title}</h2>
-              <p className="mt-2 flex-1 text-sm text-muted-foreground">{idea.description}</p>
-              <p className="mt-4 text-xs text-muted-foreground">
-                Criada em {new Date(idea.created_at).toLocaleDateString("pt-BR")}
+              <h2 className="mt-3 text-sm font-semibold leading-snug">{idea.title}</h2>
+              <p className="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">
+                {idea.description}
+              </p>
+              <p className="mt-4 text-xs text-subtle">
+                {new Date(idea.created_at).toLocaleDateString("pt-BR", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
               </p>
             </article>
           );
         })}
       </div>
+
+      {ideas.length === 0 && (
+        <p className="panel mt-6 px-5 py-10 text-center text-sm text-muted-foreground">
+          Nenhuma ideia nessa etapa ainda.
+        </p>
+      )}
     </AppShell>
   );
 }

@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Radar } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -8,9 +7,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
-    meta: [
-      { title: "Login — Radar do Campo" },
-    ],
+    meta: [{ title: "Entrar — Radar do Campo Hub" }],
   }),
   component: LoginPage,
 });
@@ -47,30 +44,29 @@ function LoginPage() {
   if (isLoading || session) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="size-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+        <div
+          role="status"
+          aria-label="Carregando"
+          className="size-6 animate-spin rounded-full border-2 border-border border-t-primary"
+        />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
-      {/* Background decoration */}
-      <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/20 via-background to-background"></div>
-      
-      <div className="z-10 w-full max-w-md space-y-8 rounded-2xl border border-border/50 bg-background/80 p-8 shadow-2xl backdrop-blur-xl">
-        <div className="text-center">
-          <img src="/favicon.png" alt="Radar do Campo" className="mx-auto mb-6 size-16 rounded-2xl object-contain shadow-lg" />
-          <h2 className="text-3xl font-bold tracking-tight text-foreground">Radar do Campo</h2>
-          <p className="mt-2 text-sm text-muted-foreground font-medium">
-            Acesso exclusivo ao Hub de Conteúdo
-          </p>
-        </div>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="panel-raised w-full max-w-sm p-7">
+        <img src="/favicon.png" alt="" className="size-11 rounded-lg object-contain" />
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">Radar do Campo Hub</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Entre com a conta Google do canal para acessar o painel.
+        </p>
 
-        <div className="mt-8">
+        <div className="mt-7">
           <Button
             onClick={handleGoogleLogin}
             disabled={isLoggingIn}
-            className="w-full h-12 text-base font-semibold shadow-md transition-all hover:shadow-lg flex items-center justify-center gap-3 bg-white text-black hover:bg-gray-100 dark:bg-white dark:text-black dark:hover:bg-gray-200"
+            className="flex h-11 w-full items-center justify-center gap-3 bg-white text-sm font-medium text-black hover:bg-white/90 dark:bg-white dark:text-black dark:hover:bg-white/90"
           >
             {isLoggingIn ? (
               <div className="size-5 animate-spin rounded-full border-2 border-black border-t-transparent"></div>
@@ -94,12 +90,12 @@ function LoginPage() {
                 />
               </svg>
             )}
-            {isLoggingIn ? "Conectando..." : "Entrar com o Google"}
+            {isLoggingIn ? "Conectando…" : "Entrar com o Google"}
           </Button>
         </div>
 
-        <p className="mt-8 text-center text-xs text-muted-foreground/80">
-          Apenas para usuários autorizados.
+        <p className="mt-6 border-t border-border pt-4 text-xs text-subtle">
+          Acesso restrito à conta autorizada do canal.
         </p>
       </div>
     </div>

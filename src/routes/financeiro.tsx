@@ -13,7 +13,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { AppShell } from "@/components/AppShell";
-import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/dashboard/SectionHeader";
+import { StatStrip } from "@/components/dashboard/StatStrip";
 import { earningsByDay } from "@/lib/mock-data";
 import { MONETIZED_PLATFORMS, formatBRL, getPlatform } from "@/lib/platforms";
 import { getFinancialEntries } from "@/lib/youtube.functions";
@@ -39,7 +40,7 @@ export const Route = createFileRoute("/financeiro")({
 
 function FinancePage() {
   const fetchFinancials = useServerFn(getFinancialEntries);
-  
+
   const query = useQuery({
     queryKey: ["financial-entries", 14],
     queryFn: () => fetchFinancials({ data: { days: 14 } }),
@@ -61,132 +62,157 @@ function FinancePage() {
   const today = rows[0]?.date;
   const todayTotal = rows.filter((r) => r.date === today).reduce((sum, r) => sum + r.amount, 0);
 
+  const byPlatform = MONETIZED_PLATFORMS.map((m) => ({
+    name: m.name,
+    total: rows.filter((r) => r.platform_id === m.id).reduce((s, r) => s + r.amount, 0),
+  })).sort((a, b) => b.total - a.total);
+  const top = byPlatform[0]?.total ? byPlatform[0] : undefined;
+  const isEmpty = !query.isLoading && rows.length === 0;
+
   return (
     <AppShell
       title="Financeiro"
       subtitle="Ganhos das plataformas monetizadas: YouTube, TikTok e Shopee."
-      actions={
-        <Badge className="bg-secondary text-secondary-foreground text-sm py-1 px-3">
-          Últimos 14 dias
-        </Badge>
-      }
+      actions={<span className="text-sm text-muted-foreground">Últimos 14 dias</span>}
     >
-      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-        <Tile label="Hoje" value={formatBRL(todayTotal)} hint="somando as 3 fontes" />
-        <Tile label="Total do período" value={formatBRL(total)} hint="14 dias" />
-        <Tile label="Média diária" value={formatBRL(total / 14)} hint="por dia" />
-        {MONETIZED_PLATFORMS.slice(0, 1).map((p) => (
-          <Tile
-            key={p.id}
-            label="Maior fonte"
-            value={
-              MONETIZED_PLATFORMS.map((m) => ({
-                name: m.name,
-                total: rows.filter((r) => r.platform_id === m.id).reduce((s, r) => s + r.amount, 0),
-              })).sort((a, b) => b.total - a.total)[0]!.name
-            }
-            hint="no período"
-          />
-        ))}
-      </div>
+      <StatStrip
+        stats={[
+          { label: "Hoje", value: formatBRL(todayTotal), hint: "somando as 3 fontes" },
+          { label: "Total do período", value: formatBRL(total), hint: "14 dias" },
+          { label: "Média diária", value: formatBRL(total / 14), hint: "por dia no período" },
+          {
+            label: "Maior fonte",
+            value: top?.name ?? "—",
+            hint: top ? `${formatBRL(top.total)} no período` : "sem lançamentos",
+          },
+        ]}
+      />
 
-      <section className="panel mt-10 p-6">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-2xl font-semibold">Ganhos por dia e plataforma</h2>
-          {query.isLoading && <p className="text-sm text-muted-foreground">Carregando...</p>}
-        </div>
-        <div className="mt-8 h-[360px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={byDay}>
-              <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
-              <XAxis
-                dataKey="label"
-                stroke="var(--muted-foreground)"
-                fontSize={13}
-                tickMargin={12}
-              />
-              <YAxis stroke="var(--muted-foreground)" fontSize={13} width={60} />
-              <Tooltip
-                cursor={{ fill: "var(--secondary)", opacity: 0.5 }}
-                contentStyle={{
-                  background: "var(--popover)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "0.75rem",
-                  color: "var(--popover-foreground)",
-                  boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
-                }}
-                formatter={(value: number, name) => [
-                  formatBRL(value),
-                  getPlatform(String(name)).name,
-                ]}
-              />
-              <Legend
-                formatter={(value) => getPlatform(String(value)).name}
-                wrapperStyle={{ paddingTop: "20px" }}
-              />
-              {MONETIZED_PLATFORMS.map((p) => (
-                <Bar
-                  key={p.id}
-                  dataKey={p.id}
-                  stackId="earnings"
-                  fill={p.color}
-                  radius={[4, 4, 0, 0]}
+      <section className="panel mt-6 p-5">
+        <SectionHeader
+          title="Ganhos por dia e plataforma"
+          description="Barras empilhadas por fonte de receita."
+          action={
+            query.isLoading ? (
+              <span className="text-sm text-muted-foreground">Carregando…</span>
+            ) : undefined
+          }
+        />
+        {isEmpty ? (
+          <EmptyState isError={query.isError} />
+        ) : (
+          <div className="mt-6 h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byDay}>
+                <CartesianGrid stroke="var(--border)" vertical={false} strokeDasharray="4 4" />
+                <XAxis
+                  dataKey="label"
+                  stroke="var(--subtle)"
+                  fontSize={12}
+                  tickMargin={10}
+                  tickLine={false}
+                  axisLine={false}
                 />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+                <YAxis
+                  stroke="var(--subtle)"
+                  fontSize={12}
+                  width={56}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  cursor={{ fill: "var(--accent)", opacity: 0.4 }}
+                  contentStyle={{
+                    background: "var(--popover)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "0.625rem",
+                    color: "var(--popover-foreground)",
+                    boxShadow: "var(--shadow-overlay)",
+                    fontSize: "0.8125rem",
+                  }}
+                  formatter={(value: number, name) => [
+                    formatBRL(value),
+                    getPlatform(String(name)).name,
+                  ]}
+                />
+                <Legend
+                  formatter={(value) => getPlatform(String(value)).name}
+                  wrapperStyle={{ paddingTop: "20px" }}
+                />
+                {MONETIZED_PLATFORMS.map((p) => (
+                  <Bar
+                    key={p.id}
+                    dataKey={p.id}
+                    stackId="earnings"
+                    fill={p.color}
+                    radius={[3, 3, 0, 0]}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </section>
 
-      <section className="panel mt-10 overflow-x-auto p-6">
-        <h2 className="text-2xl font-semibold">Histórico detalhado</h2>
-        <table className="mt-6 w-full min-w-[640px] text-base">
-          <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="pb-4">Data</th>
-              <th className="pb-4">Plataforma</th>
-              <th className="pb-4">Fonte</th>
-              <th className="pb-4 text-right">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 30).map((row, index) => {
-              const meta = getPlatform(row.platform_id);
-              const Icon = meta.icon;
-              return (
-                <tr
-                  key={`${row.date}-${row.platform_id}-${index}`}
-                  className="border-t border-border/50 hover:bg-surface-2 transition-colors"
-                >
-                  <td className="py-4 font-medium">{row.label}</td>
-                  <td className="py-4">
-                    <span className="flex items-center gap-3 font-medium">
-                      <Icon className={`size-5 ${meta.textClass}`} />
-                      {meta.name}
-                    </span>
-                  </td>
-                  <td className="py-4 text-muted-foreground">{row.source_type}</td>
-                  <td className="py-4 text-right font-semibold">{formatBRL(row.amount)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <section className="panel mt-6 overflow-hidden">
+        <div className="border-b border-border px-5 py-4">
+          <SectionHeader title="Histórico detalhado" description="Lançamento a lançamento." />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs font-medium text-subtle">
+                <th scope="col" className="px-5 py-2.5">
+                  Data
+                </th>
+                <th scope="col" className="px-5 py-2.5">
+                  Plataforma
+                </th>
+                <th scope="col" className="px-5 py-2.5">
+                  Fonte
+                </th>
+                <th scope="col" className="px-5 py-2.5 text-right">
+                  Valor
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 30).map((row, index) => {
+                const meta = getPlatform(row.platform_id);
+                const Icon = meta.icon;
+                return (
+                  <tr
+                    key={`${row.date}-${row.platform_id}-${index}`}
+                    className="border-b border-border/60 transition-colors last:border-0 hover:bg-accent/40"
+                  >
+                    <td className="px-5 py-3 tabular-nums text-muted-foreground">{row.label}</td>
+                    <td className="px-5 py-3">
+                      <span className="flex items-center gap-2.5">
+                        <Icon className="size-4" style={{ color: meta.color }} aria-hidden />
+                        {meta.name}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-muted-foreground">{row.source_type}</td>
+                    <td className="stat px-5 py-3 text-right tabular-nums">
+                      {formatBRL(row.amount)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
     </AppShell>
   );
 }
 
-function Tile({ label, value, hint }: { label: string; value: string; hint: string }) {
+function EmptyState({ isError }: { isError: boolean }) {
   return (
-    <article className="panel p-6 flex flex-col justify-between">
-      <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-4">
-        <p className="font-display text-4xl font-bold tracking-tight text-foreground">{value}</p>
-        <p className="mt-2 text-sm text-muted-foreground font-medium">{hint}</p>
-      </div>
-    </article>
+    <p className="px-5 py-12 text-center text-sm text-muted-foreground">
+      {isError
+        ? "Não foi possível carregar os ganhos agora. Tente recarregar a página."
+        : "Nenhum lançamento registrado nos últimos 14 dias."}
+    </p>
   );
 }
