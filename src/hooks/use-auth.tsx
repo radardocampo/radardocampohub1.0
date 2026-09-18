@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface AuthContextType {
   session: Session | null;
@@ -17,20 +18,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const validateSession = async (currentSession: Session | null) => {
+      if (currentSession && currentSession.user.email !== "radardocampo10@gmail.com") {
+        toast.error("Acesso negado: E-mail não autorizado.");
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+      } else {
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+      }
+      setIsLoading(false);
+    };
+
     // Busca a sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsLoading(false);
+      validateSession(session);
     });
 
     // Escuta mudanças no estado de autenticação
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsLoading(false);
+      validateSession(session);
     });
 
     return () => subscription.unsubscribe();
