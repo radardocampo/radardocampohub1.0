@@ -9,10 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/platforms";
 import { supabase } from "@/integrations/supabase/client";
-import { getYoutubeComments, getLatestSyncLog, type YoutubeModerationStatus } from "@/lib/youtube.functions";
+import {
+  getYoutubeComments,
+  getLatestSyncLog,
+  type YoutubeModerationStatus,
+} from "@/lib/youtube.functions";
 
 export const Route = createFileRoute("/comentarios")({
   head: () => ({
@@ -60,12 +69,17 @@ function CommentsPage() {
   //     (moderateMutation), abaixo. ---
   const syncCommentsMutation = useMutation({
     mutationFn: async () => {
-      const { error, data } = await supabase.functions.invoke("sync-youtube-comments", { method: "POST" });
+      const { error, data } = await supabase.functions.invoke("sync-youtube-comments", {
+        method: "POST",
+      });
       if (error) {
         let detail = error.message;
         const response = (error as { context?: Response }).context;
         if (response && typeof response.json === "function") {
-          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {}
         }
         throw new Error(detail);
       }
@@ -99,7 +113,10 @@ function CommentsPage() {
         let detail = error.message;
         const response = (error as { context?: Response }).context;
         if (response && typeof response.json === "function") {
-          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {}
         }
         throw new Error(detail);
       }
@@ -130,7 +147,13 @@ function CommentsPage() {
   // --- Moderate mutation: approve / hold for review / reject (spam). This only
   //     changes visibility on YouTube's side — never a delete (see CLAUDE.md). ---
   const moderateMutation = useMutation({
-    mutationFn: async ({ commentId, status }: { commentId: string; status: YoutubeModerationStatus }) => {
+    mutationFn: async ({
+      commentId,
+      status,
+    }: {
+      commentId: string;
+      status: YoutubeModerationStatus;
+    }) => {
       const { error, data } = await supabase.functions.invoke("moderate-youtube-comment", {
         method: "POST",
         body: { comment_id: commentId, moderation_status: status },
@@ -139,7 +162,10 @@ function CommentsPage() {
         let detail = error.message;
         const response = (error as { context?: Response }).context;
         if (response && typeof response.json === "function") {
-          try { const body = await response.clone().json(); if (body?.error) detail = String(body.error); } catch {}
+          try {
+            const body = await response.clone().json();
+            if (body?.error) detail = String(body.error);
+          } catch {}
         }
         throw new Error(detail);
       }
@@ -176,55 +202,79 @@ function CommentsPage() {
                   disabled={syncCommentsMutation.isPending}
                   className="h-9 px-3 text-sm font-medium"
                 >
-                  <RefreshCw className={`mr-2 size-4 ${syncCommentsMutation.isPending ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`mr-2 size-4 ${syncCommentsMutation.isPending ? "animate-spin" : ""}`}
+                  />
                   Sincronizar Comentários
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Busca comentários publicados, retidos para revisão e prováveis spam (até 1000 de cada por vez).
+                Busca comentários publicados, retidos para revisão e prováveis spam (até 1000 de
+                cada por vez).
               </TooltipContent>
             </UITooltip>
           </TooltipProvider>
           {syncLogQuery.data && (
             <div className="flex items-center gap-1 text-[11px] text-muted-foreground bg-secondary/50 px-2 py-1 rounded-md">
-              Última sync do canal: há {
-                (() => {
-                  const mins = Math.floor((new Date().getTime() - new Date(syncLogQuery.data.run_at).getTime()) / 60000);
-                  if (mins < 60) return `${mins}m`;
-                  if (mins < 1440) return `${Math.floor(mins / 60)}h`;
-                  return `${Math.floor(mins / 1440)}d`;
-                })()
-              }
-              <span className={`flex items-center gap-1 font-medium ${
-                syncLogQuery.data.status === 'success' ? 'text-success'
-                : syncLogQuery.data.status === 'warning' ? 'text-warning'
-                : 'text-destructive'
-              }`}>
-                · {syncLogQuery.data.status === 'success' ? 'sucesso' : syncLogQuery.data.status === 'warning' ? 'aviso' : 'erro'}
+              Última sync do canal: há{" "}
+              {(() => {
+                const mins = Math.floor(
+                  (new Date().getTime() - new Date(syncLogQuery.data.run_at).getTime()) / 60000,
+                );
+                if (mins < 60) return `${mins}m`;
+                if (mins < 1440) return `${Math.floor(mins / 60)}h`;
+                return `${Math.floor(mins / 1440)}d`;
+              })()}
+              <span
+                className={`flex items-center gap-1 font-medium ${
+                  syncLogQuery.data.status === "success"
+                    ? "text-success"
+                    : syncLogQuery.data.status === "warning"
+                      ? "text-warning"
+                      : "text-destructive"
+                }`}
+              >
+                ·{" "}
+                {syncLogQuery.data.status === "success"
+                  ? "sucesso"
+                  : syncLogQuery.data.status === "warning"
+                    ? "aviso"
+                    : "erro"}
               </span>
             </div>
           )}
         </div>
       }
     >
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="flex gap-1 rounded-lg bg-secondary p-1">
-          {COMMENT_FILTERS.map((f) => (
-            <Button
-              key={f}
-              size="sm"
-              variant={commentFilter === f ? "default" : "ghost"}
-              onClick={() => setCommentFilter(f)}
-              className="px-4 text-sm font-medium"
-            >
-              {FILTER_LABELS[f]}
-              {f === "pending" && (commentsQuery.data?.pendingCount ?? 0) > 0 && (
-                <span className="ml-2 rounded-full bg-warning/20 px-1.5 text-xs text-warning">
-                  {commentsQuery.data?.pendingCount}
-                </span>
-              )}
-            </Button>
-          ))}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label="Filtrar comentários"
+          className="inline-flex flex-wrap gap-0.5 rounded-md border border-border bg-surface p-0.5"
+        >
+          {COMMENT_FILTERS.map((f) => {
+            const active = commentFilter === f;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setCommentFilter(f)}
+                aria-pressed={active}
+                className={`rounded-[0.3rem] px-3 py-1.5 text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {FILTER_LABELS[f]}
+                {f === "pending" && (commentsQuery.data?.pendingCount ?? 0) > 0 && (
+                  <span className="ml-1.5 text-xs tabular-nums text-warning">
+                    {commentsQuery.data?.pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <p className="text-sm text-muted-foreground">
           {commentsQuery.data
@@ -243,7 +293,11 @@ function CommentsPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed rounded-xl border-border bg-surface-1/50 my-8">
           <MessageCircle className="size-12 text-muted-foreground/30 mb-4" />
           <h3 className="text-xl font-semibold mb-2">
-            {commentFilter === "pending" ? "Nada aguardando moderação" : commentFilter === "unanswered" ? "Nenhum comentário pendente" : "Nenhum comentário encontrado"}
+            {commentFilter === "pending"
+              ? "Nada aguardando moderação"
+              : commentFilter === "unanswered"
+                ? "Nenhum comentário pendente"
+                : "Nenhum comentário encontrado"}
           </h3>
           <p className="text-muted-foreground max-w-sm">
             Clique em "Sincronizar Comentários" para buscar os comentários mais recentes do canal.
@@ -254,13 +308,16 @@ function CommentsPage() {
           {commentsQuery.data!.comments.map((c) => {
             const isReplying = openReplyFor === c.comment_id;
             const draft = replyDrafts[c.comment_id] ?? "";
-            const isModerating = moderateMutation.isPending && moderateMutation.variables?.commentId === c.comment_id;
+            const isModerating =
+              moderateMutation.isPending && moderateMutation.variables?.commentId === c.comment_id;
             return (
               <article key={c.comment_id} className="panel p-5">
                 <div className="flex items-start gap-3">
                   <Avatar className="size-9 flex-shrink-0">
                     <AvatarImage src={c.author_profile_image_url} alt="" />
-                    <AvatarFallback>{(c.author_display_name || "?").slice(0, 1).toUpperCase()}</AvatarFallback>
+                    <AvatarFallback>
+                      {(c.author_display_name || "?").slice(0, 1).toUpperCase()}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -289,11 +346,18 @@ function CommentsPage() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-sm truncate max-w-[280px] text-muted-foreground" title={c.video_title}>
+                    <p
+                      className="mt-1 text-sm truncate max-w-[280px] text-muted-foreground"
+                      title={c.video_title}
+                    >
                       em: {c.video_title}
                     </p>
-                    <p className="mt-2 text-base whitespace-pre-wrap break-words">{c.text_display}</p>
-                    <p className="mt-2 text-xs text-muted-foreground">{formatNumber(c.like_count)} curtidas</p>
+                    <p className="mt-2 text-base whitespace-pre-wrap break-words">
+                      {c.text_display}
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {formatNumber(c.like_count)} curtidas
+                    </p>
 
                     {c.replies.length > 0 && (
                       <div className="mt-3 space-y-2 border-l-2 border-border/50 pl-4">
@@ -313,7 +377,11 @@ function CommentsPage() {
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       {c.can_reply && !isReplying && (
-                        <Button size="sm" variant="outline" onClick={() => setOpenReplyFor(c.comment_id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setOpenReplyFor(c.comment_id)}
+                        >
                           Responder
                         </Button>
                       )}
@@ -322,7 +390,12 @@ function CommentsPage() {
                           size="sm"
                           variant="outline"
                           disabled={isModerating}
-                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "published" })}
+                          onClick={() =>
+                            moderateMutation.mutate({
+                              commentId: c.comment_id,
+                              status: "published",
+                            })
+                          }
                         >
                           <Check className="mr-2 size-3.5" />
                           Aprovar
@@ -333,7 +406,12 @@ function CommentsPage() {
                           size="sm"
                           variant="outline"
                           disabled={isModerating}
-                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "heldForReview" })}
+                          onClick={() =>
+                            moderateMutation.mutate({
+                              commentId: c.comment_id,
+                              status: "heldForReview",
+                            })
+                          }
                         >
                           <Clock className="mr-2 size-3.5" />
                           Reter para análise
@@ -345,7 +423,9 @@ function CommentsPage() {
                           variant="outline"
                           className="text-destructive hover:text-destructive"
                           disabled={isModerating}
-                          onClick={() => moderateMutation.mutate({ commentId: c.comment_id, status: "rejected" })}
+                          onClick={() =>
+                            moderateMutation.mutate({ commentId: c.comment_id, status: "rejected" })
+                          }
                         >
                           <ShieldAlert className="mr-2 size-3.5" />
                           Marcar como spam

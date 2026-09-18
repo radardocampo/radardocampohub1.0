@@ -2,9 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Repeat } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
 import { MOCK_TASKS, type RoutineTask } from "@/lib/mock-data";
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -37,67 +35,94 @@ function RoutinePage() {
   const toggle = (id: string) =>
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
 
-  return (
-    <AppShell
-      title="Rotina"
-      subtitle="Checklist do dia para manter o ritmo de publicação."
-      actions={
-        <Badge className="bg-secondary text-secondary-foreground">
-          {done} de {tasks.length} concluídas
-        </Badge>
-      }
-    >
-      <div className="panel p-5">
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Progresso do dia
-            </p>
-            <p className="mt-2 font-display text-3xl font-semibold">{pct}%</p>
-          </div>
-          <p className="text-sm text-muted-foreground">{tasks.length - done} tarefas restantes</p>
-        </div>
-        <Progress value={pct} className="mt-4 h-2" />
-      </div>
+  const pending = tasks.filter((t) => !t.completed);
+  const completed = tasks.filter((t) => t.completed);
 
-      <ul className="mt-6 space-y-3">
-        {tasks.map((task) => (
-          <li key={task.id} className="panel flex items-start gap-4 p-4">
-            <Checkbox
-              checked={task.completed}
-              onCheckedChange={() => toggle(task.id)}
-              className="mt-0.5"
-              aria-label={task.title}
-            />
-            <div className="flex-1">
-              <p
-                className={`text-sm font-medium ${task.completed ? "text-muted-foreground line-through" : ""}`}
-              >
-                {task.title}
+  return (
+    <AppShell title="Rotina" subtitle="Checklist do dia para manter o ritmo de publicação.">
+      {/* Checklist é texto: largura de leitura em vez de esticar no monitor todo. */}
+      <div className="max-w-3xl">
+        <div className="panel p-5">
+          <div className="flex items-baseline justify-between gap-4">
+            <div>
+              <p className="stat text-3xl">
+                {done}
+                <span className="text-xl text-subtle">/{tasks.length}</span>
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {task.is_recurring ? (
-                  <span className="flex items-center gap-1 rounded-md bg-primary/12 px-2 py-1 text-xs text-primary">
-                    <Repeat className="size-3" /> Recorrente
-                  </span>
-                ) : (
-                  <span className="rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
-                    Pontual
-                  </span>
-                )}
-                {task.day_of_week.map((day) => (
-                  <span
-                    key={day}
-                    className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted-foreground"
-                  >
-                    {WEEKDAYS[day]}
-                  </span>
-                ))}
-              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {pending.length === 0
+                  ? "Tudo concluído por hoje."
+                  : `${pending.length} ${pending.length === 1 ? "tarefa" : "tarefas"} em aberto.`}
+              </p>
             </div>
-          </li>
-        ))}
-      </ul>
+            <p className="stat text-sm tabular-nums text-muted-foreground">{pct}%</p>
+          </div>
+          <div
+            className="mt-4 h-1.5 overflow-hidden rounded-full bg-secondary"
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Progresso do dia"
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+
+        {[
+          { title: "Em aberto", items: pending },
+          { title: "Concluídas", items: completed },
+        ]
+          .filter((group) => group.items.length > 0)
+          .map((group) => (
+            <section key={group.title} className="mt-8">
+              <h2 className="mb-2 text-sm font-medium text-subtle">
+                {group.title} · {group.items.length}
+              </h2>
+              <ul className="panel divide-y divide-border">
+                {group.items.map((task) => (
+                  <li key={task.id}>
+                    <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40">
+                      <Checkbox
+                        checked={task.completed}
+                        onCheckedChange={() => toggle(task.id)}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={`text-sm leading-snug ${
+                            task.completed ? "text-subtle line-through" : "text-foreground"
+                          }`}
+                        >
+                          {task.title}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
+                          {task.is_recurring ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Repeat className="size-3" aria-hidden /> Recorrente
+                            </span>
+                          ) : (
+                            <span>Pontual</span>
+                          )}
+                          {task.day_of_week.length > 0 && (
+                            <span className="tabular-nums">
+                              {task.day_of_week.length === 7
+                                ? "Todos os dias"
+                                : task.day_of_week.map((d) => WEEKDAYS[d]).join(" · ")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+      </div>
     </AppShell>
   );
 }

@@ -660,7 +660,7 @@ function MetricsPage() {
     return (
       <div className="mt-8 grid gap-8 lg:grid-cols-2">
         <div className="h-[340px]">
-          <p className="mb-1 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-1 text-xs font-medium text-subtle">
             Views por dia
           </p>
           <p className="mb-3 text-xs text-muted-foreground">
@@ -725,7 +725,7 @@ function MetricsPage() {
         </div>
 
         <div className="h-[340px]">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="mb-4 text-xs font-medium text-subtle">
             Seguidores
           </p>
           <ResponsiveContainer width="100%" height="90%">
@@ -933,7 +933,11 @@ function MetricsPage() {
 
       {(isYoutube || isTiktok) ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">
-          <TabsList className={`mb-8 grid w-full max-w-[640px] grid-cols-${isTiktok ? "2" : "4"}`}>
+          <TabsList
+            // As abas de retenção e audiência só existem no YouTube: as colunas
+            // seguem as abas realmente renderizadas, não a plataforma.
+            className={`mb-8 grid w-full max-w-[640px] ${isYoutube ? "grid-cols-4" : "grid-cols-2"}`}
+          >
             <TabsTrigger value="geral">Visão Geral</TabsTrigger>
             {isYoutube && <TabsTrigger value="retencao">Retenção</TabsTrigger>}
             {isYoutube && <TabsTrigger value="audiencia">Audiência</TabsTrigger>}
@@ -944,7 +948,7 @@ function MetricsPage() {
               TAB: VISÃO GERAL
               ============================================================ */}
           <TabsContent value="geral">
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <MetricTile
                 label="Seguidores"
                 value={formatFull(current.followers)}
@@ -1262,7 +1266,7 @@ function MetricsPage() {
                 </p>
               ) : (
                 <table className="mt-6 w-full text-base">
-                  <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="text-left text-xs font-medium text-subtle">
                     <tr>
                       <th className="pb-4">País</th>
                       <th className="pb-4">Views</th>
@@ -1473,7 +1477,7 @@ function MetricsPage() {
                 </div>
                 <div className="overflow-x-auto panel p-4">
                   <table className="w-full min-w-[950px] text-base">
-                  <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="text-left text-xs font-medium text-subtle">
                     <tr>
                       <th className="pb-4 pl-2">Vídeo</th>
                       <th className="pb-4 cursor-pointer select-none" onClick={() => toggleSort("published_at")}>
@@ -1536,7 +1540,7 @@ function MetricsPage() {
                         <td className="py-3 font-semibold">{formatNumber(video.views)}</td>
                         <td className="py-3">{formatNumber(video.likes)}</td>
                         <td className="py-3">{formatNumber(video.comments)}</td>
-                        <td className="py-3 font-medium text-success bg-success/10 px-2 py-0.5 rounded-md inline-flex mt-2">
+                        <td className="py-3 tabular-nums text-success">
                           {video.eng_rate?.toFixed(2)}%
                         </td>
                         <td className="py-3">{formatNumber(video.watch_time_hours)}h</td>
@@ -1596,7 +1600,7 @@ function MetricsPage() {
           </p>
         </div>
         <table className="mt-6 w-full min-w-[720px] text-base">
-          <thead className="text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <thead className="text-left text-xs font-medium text-subtle">
             <tr>
               <th className="pb-4">Plataforma</th>
               <th className="pb-4">Seguidores</th>
@@ -1619,7 +1623,7 @@ function MetricsPage() {
                       <Icon className={`size-5 ${row.textClass}`} />
                       {row.name}
                       {(snap.id !== "youtube" && snap.id !== "tiktok") && (
-                        <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <span className="ml-2 rounded border border-border px-1.5 py-px text-[0.6875rem] text-subtle">
                           Demonstração
                         </span>
                       )}
@@ -1628,7 +1632,7 @@ function MetricsPage() {
                   <td className="py-4 font-semibold">{formatFull(snap.followers)}</td>
                   <td className="py-4">{formatNumber(snap.views)}</td>
                   <td className="py-4">{formatNumber(snap.likes)}</td>
-                  <td className="py-4 font-medium text-success bg-success/10 px-2 py-1 inline-flex rounded-md mt-3">
+                  <td className="py-4 tabular-nums text-success">
                     {snap.engagement_rate}%
                   </td>
                 </tr>
@@ -1643,13 +1647,11 @@ function MetricsPage() {
 
 function MetricTile({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <article className="panel p-6 flex flex-col justify-between">
-      <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-4">
-        <p className="font-display text-4xl font-bold tracking-tight text-foreground">{value}</p>
-        <p className="mt-2 text-sm text-muted-foreground font-medium">{hint}</p>
+    <article className="panel flex flex-col justify-between p-4">
+      <p className="text-xs font-medium text-subtle">{label}</p>
+      <div className="mt-2">
+        <p className="stat text-2xl text-foreground">{value}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
       </div>
     </article>
   );
