@@ -59,9 +59,7 @@ function LoginPage() {
       
       <div className="z-10 w-full max-w-md space-y-8 rounded-2xl border border-border/50 bg-background/80 p-8 shadow-2xl backdrop-blur-xl">
         <div className="text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-gradient-primary text-primary-foreground shadow-lg mb-6">
-            <Radar className="size-8" />
-          </div>
+          <img src="/favicon.png" alt="Radar do Campo" className="mx-auto mb-6 size-16 rounded-2xl object-contain shadow-lg" />
           <h2 className="text-3xl font-bold tracking-tight text-foreground">Radar do Campo</h2>
           <p className="mt-2 text-sm text-muted-foreground font-medium">
             Acesso exclusivo ao Hub de Conteúdo

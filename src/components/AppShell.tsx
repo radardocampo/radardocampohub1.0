@@ -62,9 +62,7 @@ export function AppShell({
     <div className="min-h-screen bg-background">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[var(--sidebar-width)] flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <div className="flex items-center gap-3 px-5 py-6">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-gradient-primary text-primary-foreground">
-            <Radar className="size-5" />
-          </span>
+          <img src="/favicon.png" alt="Radar do Campo" className="size-10 rounded-xl object-contain" />
           <div className="leading-tight">
             <p className="font-display text-sm font-semibold text-sidebar-foreground">
               Radar do Campo
