@@ -19,7 +19,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const validateSession = async (currentSession: Session | null) => {
-      if (currentSession && currentSession.user.email !== "radardocampo10@gmail.com") {
+      const email = currentSession?.user?.email?.toLowerCase();
+      if (currentSession && email !== "radardocampo10@gmail.com") {
         toast.error("Acesso negado: E-mail não autorizado.");
         await supabase.auth.signOut();
         setSession(null);
