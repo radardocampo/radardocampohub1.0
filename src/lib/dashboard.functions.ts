@@ -57,26 +57,72 @@ export const getDashboardData = createServerFn({ method: "GET" })
     const snapshots: PlatformSnapshot[] = [];
     const earnings: Earning[] = [];
 
-    // --- YOUTUBE & TIKTOK DATA ---
-    const { data: metricsData } = await supabaseAdmin
+    // --- YOUTUBE DATA ---
+    const { data: ytMetrics } = await supabaseAdmin
       .from("metrics_daily")
       .select("*")
-      .in("platform_id", ["youtube", "tiktok"])
+      .eq("platform_id", "youtube")
       .gte("date", startStr)
       .lte("date", endStr);
 
-    const metricsByPlatform: Record<string, Record<string, any>> = {
-      youtube: {},
-      tiktok: {},
-    };
-
-    if (metricsData) {
-      metricsData.forEach((row) => {
-        metricsByPlatform[row.platform_id][row.date] = row;
+    const ytByDate: Record<string, any> = {};
+    if (ytMetrics) {
+      ytMetrics.forEach((row) => {
+        ytByDate[row.date] = row;
       });
     }
 
-    // --- PLATFORM CREDENTIALS (for tiktok followers) ---
+    const ytSeries: MetricPoint[] = dates.map((date) => {
+      const row = ytByDate[date];
+      const parsedDate = new Date(`${date}T00:00:00`);
+      const views = row?.views || 0;
+      const likes = row?.likes || 0;
+      const comments = row?.comments || 0;
+      const shares = row?.shares || 0;
+      const followers = row?.followers || 0;
+      
+      const engagement_rate = views > 0 ? Number((((likes + comments + shares) / views) * 100).toFixed(2)) : 0;
+      
+      if (row?.estimated_revenue) {
+        earnings.push({
+          id: `yt-${date}`,
+          platform_id: "youtube",
+          date,
+          amount: row.estimated_revenue,
+        });
+      }
+
+      return {
+        date,
+        label: parsedDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+        followers,
+        views,
+        likes,
+        comments,
+        shares,
+        engagement_rate,
+      };
+    });
+
+    const ytTotalFollowers = ytSeries[ytSeries.length - 1]?.followers || 0;
+    const ytTotalViews = ytSeries.reduce((acc, p) => acc + p.views, 0);
+    const ytTotalLikes = ytSeries.reduce((acc, p) => acc + p.likes, 0);
+    const ytTotalComments = ytSeries.reduce((acc, p) => acc + p.comments, 0);
+    const ytTotalShares = ytSeries.reduce((acc, p) => acc + p.shares, 0);
+    const ytAvgEng = ytTotalViews > 0 ? Number((((ytTotalLikes + ytTotalComments + ytTotalShares) / ytTotalViews) * 100).toFixed(2)) : 0;
+
+    snapshots.push({
+      id: "youtube",
+      followers: ytTotalFollowers,
+      views: ytTotalViews,
+      likes: ytTotalLikes,
+      comments: ytTotalComments,
+      shares: ytTotalShares,
+      engagement_rate: ytAvgEng,
+      series: ytSeries,
+    });
+
+    // --- TIKTOK DATA ---
     const { data: tiktokCreds } = await supabaseAdmin
       .from("platform_credentials")
       .select("follower_count")
@@ -85,57 +131,62 @@ export const getDashboardData = createServerFn({ method: "GET" })
 
     const tiktokFollowers = tiktokCreds?.follower_count || 0;
 
-    for (const platform of ["youtube", "tiktok"]) {
-      const series: MetricPoint[] = dates.map((date) => {
-        const row = metricsByPlatform[platform][date];
-        const parsedDate = new Date(`${date}T00:00:00`);
-        const views = row?.views || 0;
-        const likes = row?.likes || 0;
-        const comments = row?.comments || 0;
-        const shares = row?.shares || 0;
-        const followers = platform === "youtube" ? (row?.followers || 0) : tiktokFollowers;
-        
-        const engagement_rate = views > 0 ? Number((((likes + comments + shares) / views) * 100).toFixed(2)) : 0;
-        
-        if (platform === "youtube" && row?.estimated_revenue) {
-          earnings.push({
-            id: `yt-${date}`,
-            platform_id: "youtube",
-            date,
-            amount: row.estimated_revenue,
-          });
+    const { data: tkVideo } = await supabaseAdmin
+      .from("tiktok_video_metrics_daily")
+      .select("*")
+      .gte("date", startStr)
+      .lte("date", endStr);
+
+    const tkByDate: Record<string, any> = {};
+    if (tkVideo) {
+      tkVideo.forEach((row) => {
+        if (!tkByDate[row.date]) {
+          tkByDate[row.date] = { views: 0, likes: 0, comments: 0, shares: 0 };
         }
-
-        return {
-          date,
-          label: parsedDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-          followers,
-          views,
-          likes,
-          comments,
-          shares,
-          engagement_rate,
-        };
-      });
-
-      const totalFollowers = series[series.length - 1]?.followers || 0;
-      const totalViews = series.reduce((acc, p) => acc + p.views, 0);
-      const totalLikes = series.reduce((acc, p) => acc + p.likes, 0);
-      const totalComments = series.reduce((acc, p) => acc + p.comments, 0);
-      const totalShares = series.reduce((acc, p) => acc + p.shares, 0);
-      const avgEng = totalViews > 0 ? Number((((totalLikes + totalComments + totalShares) / totalViews) * 100).toFixed(2)) : 0;
-
-      snapshots.push({
-        id: platform,
-        followers: totalFollowers,
-        views: totalViews,
-        likes: totalLikes,
-        comments: totalComments,
-        shares: totalShares,
-        engagement_rate: avgEng,
-        series,
+        tkByDate[row.date].views += row.views || 0;
+        tkByDate[row.date].likes += row.likes || 0;
+        tkByDate[row.date].comments += row.comments || 0;
+        tkByDate[row.date].shares += row.shares || 0;
       });
     }
+
+    const tkSeries: MetricPoint[] = dates.map((date) => {
+      const vid = tkByDate[date];
+      const parsedDate = new Date(`${date}T00:00:00`);
+      const views = vid?.views || 0;
+      const likes = vid?.likes || 0;
+      const comments = vid?.comments || 0;
+      const shares = vid?.shares || 0;
+      const engagement_rate = views > 0 ? Number((((likes + comments + shares) / views) * 100).toFixed(2)) : 0;
+
+      return {
+        date,
+        label: parsedDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+        followers: tiktokFollowers,
+        views,
+        likes,
+        comments,
+        shares,
+        engagement_rate,
+      };
+    });
+
+    const tkTotalViews = tkSeries.reduce((acc, p) => acc + p.views, 0);
+    const tkTotalLikes = tkSeries.reduce((acc, p) => acc + p.likes, 0);
+    const tkTotalComments = tkSeries.reduce((acc, p) => acc + p.comments, 0);
+    const tkTotalShares = tkSeries.reduce((acc, p) => acc + p.shares, 0);
+    const tkAvgEng = tkTotalViews > 0 ? Number((((tkTotalLikes + tkTotalComments + tkTotalShares) / tkTotalViews) * 100).toFixed(2)) : 0;
+
+    snapshots.push({
+      id: "tiktok",
+      followers: tiktokFollowers,
+      views: tkTotalViews,
+      likes: tkTotalLikes,
+      comments: tkTotalComments,
+      shares: tkTotalShares,
+      engagement_rate: tkAvgEng,
+      series: tkSeries,
+    });
 
     return {
       snapshots,

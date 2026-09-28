@@ -92,7 +92,7 @@ export const PLATFORMS: PlatformMeta[] = [
   {
     id: "shopee",
     name: "Shopee",
-    monetized: true,
+    monetized: false,
     icon: ShoppingBag,
     color: "var(--platform-shopee)",
     textClass: "text-shopee",
