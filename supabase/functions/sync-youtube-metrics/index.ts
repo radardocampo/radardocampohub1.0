@@ -249,14 +249,6 @@ serve(async (req) => {
         likes: likes,
         engagement_rate: engagement_rate,
         watch_time_hours: watchTimeHours,
-        avd_seconds: dataForDay.averageViewDuration,
-        subs_gained: dataForDay.subscribersGained,
-        subs_lost: dataForDay.subscribersLost,
-        estimated_revenue: dataForDay.estimatedRevenue,
-        comments: dataForDay.comments,
-        shares: dataForDay.shares,
-        raw_data: dataForDay.raw ? { analytics_row: dataForDay.raw } : null,
-        updated_at: new Date().toISOString(),
         avd_seconds: averageViewDuration,
         subs_gained: subscribersGained,
         subs_lost: subscribersLost,
@@ -266,6 +258,7 @@ serve(async (req) => {
         views_estimated: isEstimatedToday,
         raw_data: dataForDay?.raw ? { analytics_row: dataForDay.raw } : null,
         synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
 
       runningSubscribers = runningSubscribers - subscribersGained + subscribersLost;
