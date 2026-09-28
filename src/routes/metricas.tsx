@@ -782,7 +782,7 @@ function MetricsPage() {
       return;
     }
     const redirectUri = "https://ziyuhenuuzetaedcneyb.supabase.co/functions/v1/auth-tiktok-callback";
-    const scopes = "user.info.basic";
+    const scopes = "user.info.basic,video.list,video.publish";
     const url = `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&response_type=code&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=tiktok_auth`;
     window.location.href = url;
   };
