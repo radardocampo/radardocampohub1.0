@@ -10,12 +10,12 @@ import { SectionHeader } from "@/components/dashboard/SectionHeader";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { StatStrip } from "@/components/dashboard/StatStrip";
 import {
-  buildSnapshots,
-  buildEarnings,
   MOCK_TASKS,
-  type PlatformSnapshot,
   type RoutineTask,
 } from "@/lib/mock-data";
+import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
+import { getDashboardData } from "@/lib/dashboard.functions";
 import {
   getPlatform,
   formatNumber,
@@ -71,8 +71,14 @@ function DashboardPage() {
   });
   const [tasks, setTasks] = useState<RoutineTask[]>(MOCK_TASKS);
 
-  const snapshots = useMemo(() => buildSnapshots(range), [range]);
-  const earnings = useMemo(() => buildEarnings(Math.min(range, 90)), [range]);
+  const fetchDashboardData = useServerFn(getDashboardData);
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard-data", range],
+    queryFn: () => fetchDashboardData({ data: { rangeDays: range } }),
+  });
+
+  const snapshots = dashboardQuery.data?.snapshots ?? [];
+  const earnings = dashboardQuery.data?.earnings ?? [];
 
   const rangeLabel = RANGE_OPTIONS.find((o) => o.value === range)!.full;
 

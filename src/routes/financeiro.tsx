@@ -15,9 +15,19 @@ import { useServerFn } from "@tanstack/react-start";
 import { AppShell } from "@/components/AppShell";
 import { SectionHeader } from "@/components/dashboard/SectionHeader";
 import { StatStrip } from "@/components/dashboard/StatStrip";
-import { earningsByDay } from "@/lib/mock-data";
 import { MONETIZED_PLATFORMS, formatBRL, getPlatform } from "@/lib/platforms";
 import { getFinancialEntries } from "@/lib/youtube.functions";
+
+function earningsByDay(entries: any[]) {
+  const result: Record<string, any> = {};
+  for (const e of entries) {
+    if (!result[e.date]) {
+      result[e.date] = { date: e.date, label: e.date };
+    }
+    result[e.date][e.platform_id] = (result[e.date][e.platform_id] || 0) + e.amount;
+  }
+  return Object.values(result).sort((a, b) => a.date.localeCompare(b.date));
+}
 
 export const Route = createFileRoute("/financeiro")({
   head: () => ({

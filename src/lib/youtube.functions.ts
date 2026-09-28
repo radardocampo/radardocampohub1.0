@@ -444,8 +444,9 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<FinancialEntryRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let query = supabaseAdmin
-      .from("financial_entries")
-      .select("id, platform_id, date, amount, currency, source_type")
+      .from("youtube_video_metrics_daily")
+      .select("date, estimated_revenue")
+      .not("estimated_revenue", "is", null)
       .order("date", { ascending: false });
 
     if (data.days !== null) {
@@ -458,12 +459,12 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
 
     return (rows ?? []).map((r) => ({
-      id: r.id,
-      platform_id: r.platform_id,
+      id: `yt-${r.date}`,
+      platform_id: "youtube",
       date: r.date,
-      amount: Number(r.amount),
-      currency: r.currency,
-      source_type: r.source_type ?? "",
+      amount: Number(r.estimated_revenue) || 0,
+      currency: "USD",
+      source_type: "adsense",
     }));
   });
 
