@@ -79,10 +79,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    return new Response(
-      JSON.stringify({ message: "Autenticação com o TikTok concluída com sucesso! Os tokens foram salvos de forma segura." }),
-      { headers: { "Content-Type": "application/json" } },
-    )
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Location": "https://radardocampo.online/metricas?tiktok=success",
+      },
+    })
   } catch (error) {
     console.error('Unexpected error:', error)
     return new Response(
