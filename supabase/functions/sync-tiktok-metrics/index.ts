@@ -71,7 +71,29 @@ serve(async (req) => {
         .eq("platform_id", "tiktok");
     }
 
-    // 3. Fetch Videos and Metrics from TikTok API
+    // 3. Fetch user profile (follower count)
+    let followerCount = 0;
+    try {
+      const userInfoRes = await fetch(
+        "https://open.tiktokapis.com/v2/user/info/?fields=follower_count,following_count,likes_count,video_count",
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${access_token}`,
+          },
+        }
+      );
+      const userInfoData = await userInfoRes.json();
+      if (userInfoRes.ok && userInfoData?.data?.user) {
+        followerCount = userInfoData.data.user.follower_count || 0;
+      } else {
+        console.warn("Could not fetch TikTok user info:", userInfoData);
+      }
+    } catch (e) {
+      console.warn("Error fetching TikTok user info (non-fatal):", e);
+    }
+
+    // 4. Fetch Videos and Metrics from TikTok API
     let hasMore = true;
     let cursor = 0;
     const allVideos = [];
@@ -151,11 +173,19 @@ serve(async (req) => {
     await supabase.from("sync_logs").insert({
       platform_id: "tiktok",
       status: "success",
-      message: `Processed ${allVideos.length} videos`,
+      message: `Processed ${allVideos.length} videos, ${followerCount} followers`,
       run_at: new Date().toISOString(),
     });
 
-    return new Response(JSON.stringify({ success: true, videos: allVideos.length }), {
+    // Save follower count alongside credentials for quick reads
+    if (followerCount > 0) {
+      await supabase
+        .from("platform_credentials")
+        .update({ follower_count: followerCount, updated_at: new Date().toISOString() })
+        .eq("platform_id", "tiktok");
+    }
+
+    return new Response(JSON.stringify({ success: true, videos: allVideos.length, followers: followerCount }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 

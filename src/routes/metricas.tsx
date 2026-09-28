@@ -18,7 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { RefreshCw, Video } from "lucide-react";
+import { RefreshCw, Video, CheckCircle2, Circle } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,7 @@ import {
   getPlatformGoals,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
-import { getTiktokMetrics, getTiktokTopVideos, type TiktokVideoRow } from "@/lib/tiktok.functions";
+import { getTiktokMetrics, getTiktokTopVideos, getConnectedPlatforms, getTiktokFollowerCount, type TiktokVideoRow } from "@/lib/tiktok.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -145,6 +145,21 @@ function MetricsPage() {
   const fetchPlatformGoals = useServerFn(getPlatformGoals);
   const fetchTiktokMetrics = useServerFn(getTiktokMetrics);
   const fetchTiktokTopVideos = useServerFn(getTiktokTopVideos);
+  const fetchConnectedPlatforms = useServerFn(getConnectedPlatforms);
+  const fetchTiktokFollowerCount = useServerFn(getTiktokFollowerCount);
+
+  const connectedPlatformsQuery = useQuery({
+    queryKey: ["connected-platforms"],
+    queryFn: () => fetchConnectedPlatforms(),
+    staleTime: 60_000,
+  });
+  const connectedPlatforms = connectedPlatformsQuery.data ?? {};
+
+  const tiktokFollowerQuery = useQuery({
+    queryKey: ["tiktok-follower-count"],
+    queryFn: () => fetchTiktokFollowerCount(),
+    enabled: selected === "tiktok",
+  });
 
   const currentMonth = new Date().toISOString().slice(0, 7);
   const goalsQuery = useQuery({
@@ -447,12 +462,14 @@ function MetricsPage() {
     const rows = tiktokMetricsQuery.data ?? [];
     if (rows.length === 0) return null;
 
+    const tiktokFollowers = tiktokFollowerQuery.data ?? 0;
+
     const series: MetricPoint[] = rows.map((row) => {
       const parsed = new Date(`${row.date}T00:00:00`);
       return {
         date: row.date,
         label: parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-        followers: 0,
+        followers: tiktokFollowers,
         views: row.views,
         likes: row.likes,
         comments: row.comments,
@@ -470,7 +487,7 @@ function MetricsPage() {
 
     return {
       id: "tiktok",
-      followers: 0,
+      followers: tiktokFollowers,
       followersDelta: 0,
       views: totalViews,
       likes: totalLikes,
@@ -479,7 +496,7 @@ function MetricsPage() {
       engagement_rate: avgEngagement,
       series,
     } as any;
-  }, [tiktokMetricsQuery.data]);
+  }, [tiktokMetricsQuery.data, tiktokFollowerQuery.data]);
 
   // --- Compute previous period for percentage changes ---
   const prevTotals = useMemo(() => {
@@ -864,21 +881,23 @@ function MetricsPage() {
 
           {isTiktok && (
             <div className="flex items-center gap-3">
-              <Button
-                onClick={() => syncTiktokMutation.mutate()}
-                disabled={syncTiktokMutation.isPending}
-                className="h-9 px-3 text-sm font-medium"
-              >
-                <RefreshCw className={`mr-2 size-4 ${syncTiktokMutation.isPending ? "animate-spin" : ""}`} />
-                Sincronizar TikTok
-              </Button>
-              <Button
-                onClick={handleConnectTiktok}
-                variant="outline"
-                className="h-9 px-3 text-sm font-medium"
-              >
-                Conectar TikTok
-              </Button>
+              {connectedPlatforms["tiktok"] ? (
+                <Button
+                  onClick={() => syncTiktokMutation.mutate()}
+                  disabled={syncTiktokMutation.isPending}
+                  className="h-9 px-3 text-sm font-medium"
+                >
+                  <RefreshCw className={`mr-2 size-4 ${syncTiktokMutation.isPending ? "animate-spin" : ""}`} />
+                  Sincronizar TikTok
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleConnectTiktok}
+                  className="h-9 px-3 text-sm font-medium"
+                >
+                  Conectar TikTok
+                </Button>
+              )}
             </div>
           )}
           <div className="flex gap-2">
@@ -911,6 +930,7 @@ function MetricsPage() {
         {CONTENT_PLATFORMS.map((platform) => {
           const Icon = platform.icon;
           const active = platform.id === selected;
+          const isConnected = connectedPlatforms[platform.id] || platform.id === "youtube";
           return (
             <button
               key={platform.id}
@@ -926,6 +946,11 @@ function MetricsPage() {
             >
               <Icon className="size-5" />
               {platform.name}
+              {isConnected ? (
+                <CheckCircle2 className="size-3.5 text-success" />
+              ) : (
+                <Circle className="size-3.5 text-muted-foreground/40" />
+              )}
             </button>
           );
         })}
@@ -1009,11 +1034,13 @@ function MetricsPage() {
                 value={`${current.engagement_rate}%`}
                 hint="médio do período selecionado"
               />
-              <MetricTile
-                label="Receita Estimada"
-                value={formatCurrency((current as any).estimated_revenue, "USD")}
-                hint="soma do período (AdSense, em USD)"
-              />
+              {isYoutube && (
+                <MetricTile
+                  label="Receita Estimada"
+                  value={formatCurrency((current as any).estimated_revenue, "USD")}
+                  hint="soma do período (AdSense, em USD)"
+                />
+              )}
             </div>
 
             {goalsQuery.data && goalsQuery.data.length > 0 && (

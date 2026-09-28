@@ -133,3 +133,34 @@ export const getTiktokTopVideos = createServerFn({ method: "GET" })
       };
     }).sort((a, b) => b.views - a.views).slice(0, 50);
   });
+
+/** Check which platforms are connected (have credentials saved). */
+export const getConnectedPlatforms = createServerFn({ method: "GET" })
+  .handler(async (): Promise<Record<string, boolean>> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("platform_credentials")
+      .select("platform_id");
+
+    if (error) throw new Error(error.message);
+
+    const connected: Record<string, boolean> = {};
+    for (const row of (rows ?? [])) {
+      connected[row.platform_id] = true;
+    }
+    return connected;
+  });
+
+/** Fetch the stored follower count for TikTok from platform_credentials. */
+export const getTiktokFollowerCount = createServerFn({ method: "GET" })
+  .handler(async (): Promise<number> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("platform_credentials")
+      .select("follower_count")
+      .eq("platform_id", "tiktok")
+      .single();
+
+    if (error || !data) return 0;
+    return data.follower_count || 0;
+  });
