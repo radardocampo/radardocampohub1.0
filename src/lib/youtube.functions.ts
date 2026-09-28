@@ -444,8 +444,9 @@ export const getFinancialEntries = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<FinancialEntryRow[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     let query = supabaseAdmin
-      .from("youtube_video_metrics_daily")
+      .from("metrics_daily")
       .select("date, estimated_revenue")
+      .eq("platform_id", "youtube")
       .not("estimated_revenue", "is", null)
       .order("date", { ascending: false });
 
