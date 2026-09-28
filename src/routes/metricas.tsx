@@ -882,14 +882,24 @@ function MetricsPage() {
           {isTiktok && (
             <div className="flex items-center gap-3">
               {connectedPlatforms["tiktok"] ? (
-                <Button
-                  onClick={() => syncTiktokMutation.mutate()}
-                  disabled={syncTiktokMutation.isPending}
-                  className="h-9 px-3 text-sm font-medium"
-                >
-                  <RefreshCw className={`mr-2 size-4 ${syncTiktokMutation.isPending ? "animate-spin" : ""}`} />
-                  Sincronizar TikTok
-                </Button>
+                <>
+                  <Button
+                    onClick={() => syncTiktokMutation.mutate()}
+                    disabled={syncTiktokMutation.isPending}
+                    className="h-9 px-3 text-sm font-medium"
+                  >
+                    <RefreshCw className={`mr-2 size-4 ${syncTiktokMutation.isPending ? "animate-spin" : ""}`} />
+                    Sincronizar TikTok
+                  </Button>
+                  <Button
+                    onClick={handleConnectTiktok}
+                    variant="outline"
+                    className="h-9 px-3 text-sm font-medium"
+                    title="Atualizar permissões ou conectar outra conta"
+                  >
+                    Reconectar
+                  </Button>
+                </>
               ) : (
                 <Button
                   onClick={handleConnectTiktok}
