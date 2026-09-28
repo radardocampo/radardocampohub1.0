@@ -39,7 +39,7 @@ import {
   getPlatformGoals,
   type YoutubeVideoRow,
 } from "@/lib/youtube.functions";
-import { getTiktokMetrics, getTiktokTopVideos, getConnectedPlatforms, getTiktokFollowerCount, type TiktokVideoRow } from "@/lib/tiktok.functions";
+import { getTiktokMetrics, getTiktokTopVideos, getConnectedPlatforms, getTiktokProfile, type TiktokVideoRow } from "@/lib/tiktok.functions";
 import { formatAvd, formatCurrency } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -146,7 +146,7 @@ function MetricsPage() {
   const fetchTiktokMetrics = useServerFn(getTiktokMetrics);
   const fetchTiktokTopVideos = useServerFn(getTiktokTopVideos);
   const fetchConnectedPlatforms = useServerFn(getConnectedPlatforms);
-  const fetchTiktokFollowerCount = useServerFn(getTiktokFollowerCount);
+  const fetchTiktokProfile = useServerFn(getTiktokProfile);
 
   const connectedPlatformsQuery = useQuery({
     queryKey: ["connected-platforms"],
@@ -155,11 +155,13 @@ function MetricsPage() {
   });
   const connectedPlatforms = connectedPlatformsQuery.data ?? {};
 
-  const tiktokFollowerQuery = useQuery({
-    queryKey: ["tiktok-follower-count"],
-    queryFn: () => fetchTiktokFollowerCount(),
+  const tiktokProfileQuery = useQuery({
+    queryKey: ["tiktok-profile"],
+    queryFn: () => fetchTiktokProfile(),
     enabled: selected === "tiktok",
   });
+  const tiktokProfile = tiktokProfileQuery.data?.metadata ?? {};
+  const tiktokFollowers = tiktokProfileQuery.data?.followers ?? 0;
 
   const currentMonth = new Date().toISOString().slice(0, 7);
   const goalsQuery = useQuery({
@@ -374,6 +376,8 @@ function MetricsPage() {
       await queryClient.invalidateQueries({ queryKey: ["tiktok-metrics"] });
       await queryClient.invalidateQueries({ queryKey: ["tiktok-videos"] });
       await queryClient.invalidateQueries({ queryKey: ["sync-log"] });
+      await queryClient.invalidateQueries({ queryKey: ["tiktok-profile"] });
+      await queryClient.invalidateQueries({ queryKey: ["connected-platforms"] });
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Erro desconhecido";
@@ -462,8 +466,6 @@ function MetricsPage() {
     const rows = tiktokMetricsQuery.data ?? [];
     if (rows.length === 0) return null;
 
-    const tiktokFollowers = tiktokFollowerQuery.data ?? 0;
-
     const series: MetricPoint[] = rows.map((row) => {
       const parsed = new Date(`${row.date}T00:00:00`);
       return {
@@ -496,7 +498,7 @@ function MetricsPage() {
       engagement_rate: avgEngagement,
       series,
     } as any;
-  }, [tiktokMetricsQuery.data, tiktokFollowerQuery.data]);
+  }, [tiktokMetricsQuery.data, tiktokFollowers]);
 
   // --- Compute previous period for percentage changes ---
   const prevTotals = useMemo(() => {
@@ -965,6 +967,42 @@ function MetricsPage() {
           );
         })}
       </div>
+
+      {/* TikTok Profile Header */}
+      {isTiktok && tiktokProfile.display_name && (
+        <div className="mt-6 flex items-start gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+          {tiktokProfile.avatar_url && (
+            <img
+              src={tiktokProfile.avatar_url}
+              alt={tiktokProfile.display_name}
+              className="size-16 rounded-full object-cover"
+            />
+          )}
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-xl font-bold">{tiktokProfile.display_name}</h3>
+              {tiktokProfile.is_verified && <CheckCircle2 className="size-4 text-primary" />}
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
+              {tiktokProfile.bio_description}
+            </p>
+            <div className="mt-4 flex gap-6 text-sm font-medium">
+              <div>
+                <span className="text-foreground text-lg">{formatNumber(tiktokFollowers)}</span>{" "}
+                <span className="text-muted-foreground">seguidores</span>
+              </div>
+              <div>
+                <span className="text-foreground text-lg">{formatNumber(tiktokProfile.likes_count || 0)}</span>{" "}
+                <span className="text-muted-foreground">curtidas totais</span>
+              </div>
+              <div>
+                <span className="text-foreground text-lg">{formatNumber(tiktokProfile.video_count || 0)}</span>{" "}
+                <span className="text-muted-foreground">vídeos publicados</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(isYoutube || isTiktok) ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">

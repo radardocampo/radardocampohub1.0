@@ -151,16 +151,19 @@ export const getConnectedPlatforms = createServerFn({ method: "GET" })
     return connected;
   });
 
-/** Fetch the stored follower count for TikTok from platform_credentials. */
-export const getTiktokFollowerCount = createServerFn({ method: "GET" })
-  .handler(async (): Promise<number> => {
+/** Fetch the stored profile info for TikTok from platform_credentials. */
+export const getTiktokProfile = createServerFn({ method: "GET" })
+  .handler(async (): Promise<{ followers: number; metadata: any }> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data, error } = await supabaseAdmin
       .from("platform_credentials")
-      .select("follower_count")
+      .select("follower_count, metadata")
       .eq("platform_id", "tiktok")
       .single();
 
-    if (error || !data) return 0;
-    return data.follower_count || 0;
+    if (error || !data) return { followers: 0, metadata: {} };
+    return { 
+      followers: data.follower_count || 0,
+      metadata: data.metadata || {}
+    };
   });
