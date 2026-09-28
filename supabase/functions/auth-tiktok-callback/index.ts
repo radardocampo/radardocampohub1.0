@@ -45,6 +45,14 @@ Deno.serve(async (req) => {
 
     const tokenData = await tokenResponse.json()
 
+    if (!tokenData.access_token) {
+      console.error('TikTok API returned no access_token:', tokenData)
+      return new Response(
+        JSON.stringify({ error: "TikTok did not return an access token", details: tokenData }), 
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      )
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     
