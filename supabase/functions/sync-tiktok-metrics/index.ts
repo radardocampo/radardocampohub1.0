@@ -71,11 +71,21 @@ serve(async (req) => {
         .eq("platform_id", "tiktok");
     }
 
-    // 3. Fetch user profile (follower count)
+    // 3. Fetch user profile (all available fields from user.info.basic, user.info.profile, user.info.stats)
     let followerCount = 0;
+    let userProfile: Record<string, any> = {};
     try {
+      // Fields from user.info.basic: open_id, union_id, avatar_url, display_name
+      // Fields from user.info.profile: bio_description, is_verified, profile_deep_link
+      // Fields from user.info.stats: follower_count, following_count, likes_count, video_count
+      const userFields = [
+        "open_id", "union_id", "avatar_url", "display_name",
+        "bio_description", "is_verified", "profile_deep_link",
+        "follower_count", "following_count", "likes_count", "video_count"
+      ].join(",");
+
       const userInfoRes = await fetch(
-        "https://open.tiktokapis.com/v2/user/info/?fields=follower_count,following_count,likes_count,video_count",
+        `https://open.tiktokapis.com/v2/user/info/?fields=${userFields}`,
         {
           method: "GET",
           headers: {
@@ -85,7 +95,18 @@ serve(async (req) => {
       );
       const userInfoData = await userInfoRes.json();
       if (userInfoRes.ok && userInfoData?.data?.user) {
-        followerCount = userInfoData.data.user.follower_count || 0;
+        const user = userInfoData.data.user;
+        followerCount = user.follower_count || 0;
+        userProfile = {
+          display_name: user.display_name || "",
+          avatar_url: user.avatar_url || "",
+          bio_description: user.bio_description || "",
+          is_verified: user.is_verified || false,
+          following_count: user.following_count || 0,
+          likes_count: user.likes_count || 0,
+          video_count: user.video_count || 0,
+        };
+        console.log("TikTok user profile fetched:", userProfile);
       } else {
         console.warn("Could not fetch TikTok user info:", userInfoData);
       }
@@ -177,15 +198,24 @@ serve(async (req) => {
       run_at: new Date().toISOString(),
     });
 
-    // Save follower count alongside credentials for quick reads
-    if (followerCount > 0) {
+    // Save follower count and profile metadata alongside credentials for quick reads
+    if (followerCount > 0 || Object.keys(userProfile).length > 0) {
       await supabase
         .from("platform_credentials")
-        .update({ follower_count: followerCount, updated_at: new Date().toISOString() })
+        .update({
+          follower_count: followerCount,
+          metadata: userProfile,
+          updated_at: new Date().toISOString(),
+        })
         .eq("platform_id", "tiktok");
     }
 
-    return new Response(JSON.stringify({ success: true, videos: allVideos.length, followers: followerCount }), {
+    return new Response(JSON.stringify({
+      success: true,
+      videos: allVideos.length,
+      followers: followerCount,
+      profile: userProfile,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
