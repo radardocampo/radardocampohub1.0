@@ -33,9 +33,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     // Busca a sessão inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      validateSession(session);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        validateSession(session);
+      })
+      .catch((err) => {
+        console.error("Erro ao buscar sessão (provavelmente expirada):", err);
+        validateSession(null);
+      });
 
     // Escuta mudanças no estado de autenticação
     const {
