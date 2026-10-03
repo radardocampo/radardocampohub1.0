@@ -50,6 +50,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">
           Algo deu errado do nosso lado. Tente recarregar ou volte ao início.
         </p>
+        <div className="mt-4 rounded-md bg-destructive/10 p-4 text-left text-xs text-destructive overflow-auto max-h-48">
+          <p className="font-semibold">{error.message}</p>
+          {error.stack && <pre className="mt-2 whitespace-pre-wrap">{error.stack}</pre>}
+        </div>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
